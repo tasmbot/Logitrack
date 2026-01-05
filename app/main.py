@@ -1,4 +1,4 @@
-from .gui import LogisticsApp
+from app.gui import LogisticsApp
 import tkinter as tk 
 
 # === Запуск ===
