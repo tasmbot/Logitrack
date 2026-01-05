@@ -9,8 +9,8 @@ import time
 import pandas as pd
 import contextily as ctx
 
-from app.config import DB_CONFIG
-from app.db_utils import get_connection, set_user_id_in_session 
+from config import DB_CONFIG
+from db_utils import get_connection, set_user_id_in_session 
 
 class LogisticsApp:
     def __init__(self, root):
