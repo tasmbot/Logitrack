@@ -59,15 +59,15 @@
 *	курьер;
 *	администратор.
 
-![alt text](image.png)
+![alt text](other/image.png)
 
 Диаграмма компонентов:
-![alt text](image-1.png)
+![alt text](other/image-1.png)
 
 Логическая схема базы данных:
-![alt text](image-2.png)
+![alt text](other/image-2.png)
 
 Физическая схема базы данных:
-![alt text](image-3.png)
+![alt text](other/image-3.png)
 ## Глава 4. Реализация интерфейса и демонстрация работы.
 
