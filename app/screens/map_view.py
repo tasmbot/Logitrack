@@ -7,26 +7,30 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import threading
 import time
+import contextily as ctx
 
-class MapViewScreen(BaseScreen):
+class MapViewScreen:
+    def __init__(self, root, app, order_id):
+        self.root = root  # Это Toplevel
+        self.app = app    # Это LogisticsApp
+        self.order_id = order_id
+        self.create_widgets()
+
     def create_widgets(self):
-        back_btn = tk.Button(self.root, text="← Назад", command=self.app.go_back)
-        back_btn.pack(anchor="nw", padx=10, pady=5)
-
-        self.order_id = self.app.current_order_id
-
         try:
             conn = get_connection()
             cur = conn.cursor()
 
+            # Получаем delivery_id
             cur.execute("SELECT delivery_id FROM deliveries WHERE order_id = %s", (self.order_id,))
             delivery_row = cur.fetchone()
             if not delivery_row:
                 messagebox.showerror("Ошибка", "Доставка не найдена")
-                self.app.go_back()
+                self.root.destroy()
                 return
             delivery_id = delivery_row[0]
 
+            # Получаем координаты магазина и клиента
             cur.execute("""
                 SELECT
                     store_loc.latitude AS store_lat,
@@ -45,7 +49,7 @@ class MapViewScreen(BaseScreen):
 
             if not coords:
                 messagebox.showerror("Ошибка", "Не найдены координаты маршрута")
-                self.app.go_back()
+                self.root.destroy()
                 return
 
             store_lat = float(coords[0])
@@ -53,16 +57,19 @@ class MapViewScreen(BaseScreen):
             client_lat = float(coords[2])
             client_lng = float(coords[3])
 
-            map_win = tk.Toplevel(self.root)
-            map_win.title(f"Карта доставки — Заказ #{self.order_id}")
-            map_win.geometry("800x600")
+            # === Создаём окно ===
+            self.root.title(f"Карта доставки — Заказ #{self.order_id}")
+            self.root.geometry("800x600")
 
+            # === Создаём фигуру matplotlib ===
             fig, ax = plt.subplots(figsize=(8, 6))
-            canvas = FigureCanvasTkAgg(fig, map_win)
+            canvas = FigureCanvasTkAgg(fig, self.root)
             canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+            # Флаг остановки
             stop_simulation = threading.Event()
 
+            # === ФУНКЦИЯ ОБНОВЛЕНИЯ ГРАФИКА ===
             def redraw_map(courier_lat, courier_lng):
                 ax.clear()
                 if courier_lat is not None and courier_lng is not None:
@@ -71,41 +78,70 @@ class MapViewScreen(BaseScreen):
                     ax.plot([courier_lng, client_lng], [courier_lat, client_lat], 'k--', alpha=0.5, label='Маршрут')
                 else:
                     ax.scatter(client_lng, client_lat, color='red', s=200, label='Адрес доставки', marker='X')
-                
-                ax.set_title(f"Заказ #{self.order_id} — отслеживание в реальном времени")
-                ax.set_xlabel("Longitude")
-                ax.set_ylabel("Latitude")
+
+                # <<< ДОБАВЛЕНО: фоновая карта >>>
+                try:
+                    # Устанавливаем границы (немного шире, чем точки)
+                    margin = 0.01
+                    minx = min(courier_lng, client_lng) - margin if courier_lng else client_lng - margin
+                    maxx = max(courier_lng, client_lng) + margin if courier_lng else client_lng + margin
+                    miny = min(courier_lat, client_lat) - margin if courier_lat else client_lat - margin
+                    maxy = max(courier_lat, client_lat) + margin if courier_lat else client_lat + margin
+
+                    ax.set_xlim(minx, maxx)
+                    ax.set_ylim(miny, maxy)
+                    ctx.add_basemap(ax, crs=4326, source=ctx.providers.OpenStreetMap.Mapnik)
+                except Exception as e:
+                    print(f"Не удалось загрузить карту: {e}")
+                    ax.set_xlim(min(client_lng, courier_lng or client_lng) - 0.02, max(client_lng, courier_lng or client_lng) + 0.02)
+                    ax.set_ylim(min(client_lat, courier_lat or client_lat) - 0.02, max(client_lat, courier_lat or client_lat) + 0.02)
+
+                ax.set_title(f"Заказ №{self.order_id} — отслеживание в реальном времени")
+                ax.set_xlabel("Долгота")
+                ax.set_ylabel("Широта")
                 ax.legend()
-                ax.grid(True)
-                ax.set_aspect('equal', adjustable='box')
+                ax.grid(False)  # фоновая карта = сетка не нужна
                 canvas.draw()
 
+            # === ИНИЦИАЛИЗАЦИЯ ===
             current_lat, current_lng = store_lat, store_lng
             self.app.update_courier_position(delivery_id, current_lat, current_lng)
             redraw_map(current_lat, current_lng)
 
+            # === ЦИКЛ СИМУЛЯЦИИ ===
             def simulation_loop():
                 nonlocal current_lat, current_lng
                 while not stop_simulation.is_set():
-                    current_lat += (client_lat - current_lat) * 0.2
-                    current_lng += (client_lng - current_lng) * 0.2
+                    # Обновляем позицию
+                    current_lat += (client_lat - current_lat) * 0.4
+                    current_lng += (client_lng - current_lng) * 0.4
+
+                    # Сохраняем в БД
                     self.app.update_courier_position(delivery_id, current_lat, current_lng)
-                    map_win.after(0, lambda: redraw_map(current_lat, current_lng))
+
+                    # Обновляем график в основном потоке GUI!
+                    self.root.after(0, lambda: redraw_map(current_lat, current_lng))
+
                     time.sleep(10)
+
+                    # Проверка завершения
                     if abs(current_lat - client_lat) < 0.0001 and abs(current_lng - client_lng) < 0.0001:
                         self.app.update_courier_position(delivery_id, client_lat, client_lng)
-                        map_win.after(0, lambda: redraw_map(client_lat, client_lng))
-                        map_win.after(1000, lambda: messagebox.showinfo("Инфо", "Курьер достиг адреса доставки"))
+                        self.app.mark_order_as_delivered(self.order_id)
+                        self.root.after(0, lambda: redraw_map(client_lat, client_lng))
+                        self.root.after(1000, lambda: messagebox.showinfo("Инфо", "Курьер достиг адреса доставки"))
                         break
 
+            # Запуск в фоне
             threading.Thread(target=simulation_loop, daemon=True).start()
 
+            # Обработка закрытия
             def on_close():
                 stop_simulation.set()
-                map_win.destroy()
+                self.root.destroy()
 
-            map_win.protocol("WM_DELETE_WINDOW", on_close)
+            self.root.protocol("WM_DELETE_WINDOW", on_close)
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить карту:\n{e}")
-            self.app.go_back()
+            self.root.destroy()

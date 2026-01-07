@@ -96,7 +96,7 @@ class LogisticsApp:
         map_root = tk.Toplevel(self.root)
         map_root.title(f"Карта доставки — Заказ #{order_id}")
         map_root.geometry("800x600")
-        MapViewScreen(map_root, self)
+        MapViewScreen(map_root, self, order_id)
 
     def update_courier_position(self, delivery_id, lat, lng):
         """Обновляет или вставляет запись в delivery_coordinates"""
@@ -113,3 +113,18 @@ class LogisticsApp:
             conn.close()
         except Exception as e:
             print(f"Ошибка обновления координат: {e}")
+            
+    def mark_order_as_delivered(self, order_id):
+        """Меняет статус заказа на 'delivered'"""
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
+            # Получаем status_id для 'delivered'
+            cur.execute("SELECT status_id FROM statuses WHERE status_name = 'delivered'")
+            status_id = cur.fetchone()[0]
+            # Обновляем заказ
+            cur.execute("UPDATE orders SET status_id = %s WHERE order_id = %s", (status_id, order_id))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Ошибка обновления статуса: {e}")
