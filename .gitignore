@@ -1,0 +1,11 @@
+app/__pycache__/app_core.cpython-312.pyc
+app/__pycache__/config.cpython-312.pyc
+app/__pycache__/db_utils.cpython-312.pyc
+app/__pycache__/gui.cpython-312.pyc
+app/screens/__pycache__/base_screen.cpython-312.pyc
+app/screens/__pycache__/client_orders.cpython-312.pyc
+app/screens/__pycache__/create_order.cpython-312.pyc
+app/screens/__pycache__/login.cpython-312.pyc
+app/screens/__pycache__/main_menu.cpython-312.pyc
+app/screens/__pycache__/notifications.cpython-312.pyc
+app/screens/__pycache__/profile.cpython-312.pyc
