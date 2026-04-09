@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Регистрация{% endblock %}
+{% block content %}
+<div class="max-w-lg mx-auto bg-white p-8 rounded shadow mt-10">
+    <h1 class="text-2xl font-bold mb-6 text-center">📝 Регистрация</h1>
+    <form action="/register" method="post" class="space-y-4">
+        <!-- Логин -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium">Email</label>
+                <input type="email" name="email" required class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium">Пароль</label>
+                <input type="password" name="password" required minlength="6" class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium">Подтвердите пароль</label>
+            <input type="password" name="confirm_password" required minlength="6" class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <!-- Профиль (как в "Обо мне") -->
+        <div>
+            <label class="block text-sm font-medium">ФИО</label>
+            <input type="text" name="full_name" required class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+            <label class="block text-sm font-medium">Телефон</label>
+            <input type="tel" name="phone" placeholder="+7..." class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium">Адрес доставки</label>
+                <input type="text" name="address" class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium">Дата рождения</label>
+                <input type="date" name="date_of_birth" class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium">Пол</label>
+            <select name="sex" class="w-full p-2 border rounded mt-1 focus:ring-2 focus:ring-blue-500">
+                <option value="male">Мужской</option>
+                <option value="female">Женский</option>
+            </select>
+        </div>
+
+        <!-- Выбор роли -->
+        <div class="pt-2">
+            <label class="block text-sm font-medium mb-2">Выберите роль в системе:</label>
+            <div class="flex space-x-6">
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" name="role" value="client" checked class="w-4 h-4 text-blue-600 focus:ring-blue-500">
+                    <span>👤 Клиент</span>
+                </label>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="radio" name="role" value="courier" class="w-4 h-4 text-blue-600 focus:ring-blue-500">
+                    <span>🚚 Курьер</span>
+                </label>
+            </div>
+        </div>
+
+        <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700 font-medium transition">Зарегистрироваться</button>
+    </form>
+    
+    <div class="mt-4 text-center text-sm text-gray-600">
+        Уже есть аккаунт? <a href="/login" class="text-blue-600 hover:underline font-medium">Войти</a>
+    </div>
+</div>
+{% endblock %}

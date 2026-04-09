@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-2xl font-bold mb-6">👤 Обо мне</h1>
+    
+    <!-- Сообщения -->
+    {% with messages = request.session.pop("_messages", []) %}
+        {% for msg in messages %}
+            <div class="p-3 mb-4 rounded {% if 'error' in msg.lower() %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                {{ msg }}
+            </div>
+        {% endfor %}
+    {% endwith %}
+    
+    <!-- Карточка профиля -->
+    <div class="bg-white p-6 rounded shadow space-y-4">
+        <!-- Только для чтения -->
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Имя</label>
+            <p class="mt-1 text-gray-900">{{ user.full_name }}</p>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Email</label>
+            <p class="mt-1 text-gray-900">{{ user.email }}</p>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Роль</label>
+            <p class="mt-1 text-gray-900">{{ user.role_name }}</p>
+        </div>
+        
+        <!-- Редактируемые поля (только для клиентов в MVP) -->
+        {% if request.session.get("role_id") == 4 %}
+        <form action="/profile/update" method="post" class="space-y-4 pt-4 border-t">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Телефон</label>
+                <input type="tel" name="phone" value="{{ user.phone }}" 
+                       class="mt-1 w-full p-2 border rounded" placeholder="+7...">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Адрес доставки</label>
+                <input type="text" name="address" value="{{ user.address }}" 
+                       class="mt-1 w-full p-2 border rounded" placeholder="г. Москва, ул...">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Дата рождения</label>
+                <input type="date" name="date_of_birth" value="{{ user.date_of_birth }}" 
+                       class="mt-1 w-full p-2 border rounded">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Пол</label>
+                <select name="sex" class="mt-1 w-full p-2 border rounded">
+                    <option value="male" {% if user.sex == "male" %}selected{% endif %}>Мужской</option>
+                    <option value="female" {% if user.sex == "female" %}selected{% endif %}>Женский</option>
+                </select>
+            </div>
+            <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700">
+                💾 Сохранить изменения
+            </button>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500 italic">
+            ℹ️ Редактирование профиля доступно только для роли «Клиент».
+        </p>
+        {% endif %}
+    </div>
+    
+    <!-- Кнопка назад -->
+    <div class="mt-6">
+        <a href="javascript:history.back()" class="text-blue-600 hover:underline">← Вернуться назад</a>
+    </div>
+</div>
+{% endblock %}

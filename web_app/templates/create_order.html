@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Создать заказ{% endblock %}
+{% block content %}
+{% if not has_address %}
+<div class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
+    ⚠️ У вас не указан адрес доставки. Пожалуйста, <a href="/profile" class="underline font-bold">обновите профиль</a>.
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Добавление товаров -->
+    <div class="bg-white p-4 rounded shadow">
+        <h2 class="text-xl font-bold mb-4">🛒 Товары</h2>
+        <label class="block text-sm font-medium">Товар</label>
+        <select id="item-select" class="w-full p-2 border rounded mb-2">
+            {% for item in items %}
+            <option value="{{ item.item_id }}" data-price="{{ item.price }}">{{ item.item_name }} ({{ item.price }} ₽)</option>
+            {% endfor %}
+        </select>
+        <label class="block text-sm font-medium">Количество</label>
+        <input type="number" id="qty-input" value="1" min="1" class="w-full p-2 border rounded mb-2">
+        <button onclick="addToCart()" class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700">Добавить в корзину</button>
+    </div>
+
+    <!-- Корзина -->
+    <div class="bg-white p-4 rounded shadow">
+        <h2 class="text-xl font-bold mb-4">📦 Корзина</h2>
+        <ul id="cart-list" class="space-y-2 mb-4 min-h-[100px] text-gray-700"></ul>
+        <div class="flex justify-between font-bold mb-2"><span>Итого:</span><span id="cart-total">0 ₽</span></div>
+        <textarea id="comment-input" placeholder="Комментарий к заказу..." class="w-full p-2 border rounded mb-2 h-20"></textarea>
+        <button onclick="submitOrder()" id="submit-btn" class="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700 disabled:bg-gray-400" disabled>Оформить заказ</button>
+        <a href="/dashboard/client" class="block text-center mt-2 text-blue-600 hover:underline">← Назад</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let cart = [];
+const cartList = document.getElementById('cart-list');
+const totalEl = document.getElementById('cart-total');
+const submitBtn = document.getElementById('submit-btn');
+
+function addToCart() {
+    const sel = document.getElementById('item-select');
+    const id = parseInt(sel.value);
+    const name = sel.options[sel.selectedIndex].text.split(' (')[0];
+    const price = parseFloat(sel.options[sel.selectedIndex].dataset.price);
+    const qty = parseInt(document.getElementById('qty-input').value) || 1;
+
+    const existing = cart.find(i => i.id === id);
+    if (existing) existing.qty += qty;
+    else cart.push({id, name, price, qty});
+    renderCart();
+}
+
+function removeFromCart(id) {
+    cart = cart.filter(i => i.id !== id);
+    renderCart();
+}
+
+function renderCart() {
+    cartList.innerHTML = '';
+    let total = 0;
+    cart.forEach(item => {
+        const li = document.createElement('li');
+        li.className = 'flex justify-between items-center bg-gray-50 p-2 rounded';
+        li.innerHTML = `<span>${item.name} x${item.qty}</span>
+            <div class="flex items-center space-x-2">
+                <span class="font-medium">${(item.price * item.qty).toFixed(2)} ₽</span>
+                <button onclick="removeFromCart(${item.id})" class="text-red-500 hover:text-red-700 font-bold">×</button>
+            </div>`;
+        cartList.appendChild(li);
+        total += item.price * item.qty;
+    });
+    totalEl.textContent = total.toFixed(2) + ' ₽';
+    submitBtn.disabled = cart.length === 0;
+}
+
+async function submitOrder() {
+    if (cart.length === 0) return;
+    submitBtn.disabled = true; submitBtn.textContent = 'Оформление...';
+    try {
+        const res = await fetch('/client/orders', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({cart: cart.map(i => ({id: i.id, qty: i.qty})), comment: document.getElementById('comment-input').value})
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            alert(`✅ Заказ #${data.order_id} успешно создан!`);
+            window.location.href = '/dashboard/client';
+        } else {
+            alert('❌ Ошибка: ' + data.detail);
+        }
+    } catch (e) { alert('❌ Ошибка сети'); }
+    finally { submitBtn.disabled = false; submitBtn.textContent = 'Оформить заказ'; }
+}
+</script>
+{% endblock %}

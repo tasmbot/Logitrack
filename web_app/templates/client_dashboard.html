@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Мои заказы{% endblock %}
+{% block content %}
+<div class="mb-4 flex justify-between items-center">
+    <h1 class="text-2xl font-bold">👤 Мои заказы</h1>
+    <div class="space-x-2">
+        <a href="/client/create" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">➕ Новый заказ</a>
+        <a href="/profile" class="text-sm text-gray-600 hover:text-blue-600 underline">👤 Обо мне</a>
+    </div>
+</div>
+
+<!-- Статистика -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white p-4 rounded shadow"><span class="text-gray-500 text-sm">Активные</span><p class="text-2xl font-bold text-blue-600" id="stat-active">0</p></div>
+    <div class="bg-white p-4 rounded shadow"><span class="text-gray-500 text-sm">Доставлено</span><p class="text-2xl font-bold text-green-600" id="stat-done">0</p></div>
+    <div class="bg-white p-4 rounded shadow"><span class="text-gray-500 text-sm">Всего потрачено</span><p class="text-2xl font-bold" id="stat-total">0 ₽</p></div>
+</div>
+
+<!-- Таблица заказов (кнопка экспорта теперь внутри шапки контейнера) -->
+<div class="bg-white p-4 rounded shadow">
+    <div class="flex justify-between items-center mb-3">
+        <h3 class="font-bold text-lg">📋 История заказов</h3>
+        <a href="/client/api/orders/export" class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 border border-gray-300 transition">
+            📊 Экспорт CSV
+        </a>
+    </div>
+    <div id="client-orders-table" style="height: 500px;"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let ordersTable;
+
+async function loadOrders() {
+    try {
+        const res = await fetch('/client/api/orders', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Обновляем KPI
+        document.getElementById('stat-active').textContent = data.filter(o => ['created','in_transit'].includes(o.status_name)).length || 0;
+        document.getElementById('stat-done').textContent = data.filter(o => o.status_name === 'delivered').length || 0;
+        document.getElementById('stat-total').textContent = data.reduce((s,o)=>s+(parseFloat(o.total_price)||0),0).toFixed(2) + ' ₽';
+
+        if (ordersTable) {
+            ordersTable.replaceData(data);
+        } else {
+            ordersTable = new Tabulator("#client-orders-table", {
+                 data,
+                height: "100%",
+                layout: "fitColumns",
+                placeholder: "Нет заказов",
+                columns: [
+                    {title:"ID", field:"order_id", width:60, formatter: (cell) => 
+                        `<a href="/operator/orders/${cell.getValue()}/detail" class="text-blue-600 hover:underline font-medium">#${cell.getValue()}</a>`},
+                    {title:"Адрес", field:"delivery_location"},
+                    {title:"Товары", field:"items"},
+                    {title:"Статус", field:"status_name", width:120},
+                    {title:"Сумма", field:"total_price", width:90},
+                    {title:"Дата", field:"created_at", width:140}
+                ]
+            });
+        }
+    } catch (e) {
+        console.error("❌ Ошибка загрузки заказов:", e);
+        document.getElementById('client-orders-table').innerHTML = 
+            `<div class="p-4 text-red-600">Ошибка загрузки: ${e.message}</div>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadOrders);
+</script>
+{% endblock %}

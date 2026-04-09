@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    /* 🔥 Фикс для Leaflet внутри Tailwind-контейнеров */
+    #courier-route-map .leaflet-container {
+        width: 100% !important;
+        height: 100% !important;
+        border-radius: 0.375rem;
+    }
+    #courier-route-map .leaflet-pane,
+    #courier-route-map .leaflet-tile,
+    #courier-route-map .leaflet-marker-icon,
+    #courier-route-map .leaflet-marker-shadow {
+        z-index: 1 !important;
+    }
+    /* Убираем стандартный фон маркера Leaflet, если он мешает */
+    .leaflet-marker-icon {
+        background: none !important;
+        border: none !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold">🚚 Мои доставки</h1>
+    <p class="text-gray-600">Активные маршруты и геопозиция</p>
+</div>
+
+<div class="mb-4 flex justify-end">
+    <a href="/profile" class="text-sm text-gray-600 hover:text-blue-600 underline">
+        👤 Обо мне
+    </a>
+</div>
+
+<!-- Активные доставки -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <h3 class="font-bold mb-3">📋 Текущие заказы</h3>
+    <div id="courier-active-table" class="h-48"></div>
+</div>
+
+<!-- Карта маршрута -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <h3 class="font-bold mb-3 text-lg">🗺️ Карта маршрута</h3>
+    <!-- 🔥 Убран overflow-hidden, добавлен relative -->
+    <div id="courier-route-map" style="height: 450px; width: 100%;" class="rounded border z-0 relative"></div>
+    <p class="text-xs text-gray-400 mt-2">📍 Точки маршрута отображаются в порядке посещения</p>
+</div>
+
+<!-- Статистика курьера -->
+<div class="grid grid-cols-2 gap-4">
+    <div class="bg-white p-4 rounded shadow">
+        <span class="text-gray-500 text-sm">Выполнено сегодня</span>
+        <p class="text-2xl font-bold text-green-600" id="courier-done">0</p>
+    </div>
+    <div class="bg-white p-4 rounded shadow">
+        <span class="text-gray-500 text-sm">В пути</span>
+        <p class="text-2xl font-bold text-blue-600" id="courier-active">0</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/dashboard_init.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// === Глобальные переменные ===
+let courierOrdersTable = null;
+let routeMapInstance = null;
+
+// === Таблица заказов ===
+async function loadCourierOrders() {
+    try {
+        const res = await fetch('/courier/api/orders', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Обновляем KPI
+        const active = data.filter(o => ['created', 'in_transit'].includes(o.status_name)).length || 0;
+        const done = data.filter(o => o.status_name === 'delivered').length || 0;
+        document.getElementById('courier-active').textContent = active;
+        document.getElementById('courier-done').textContent = done;
+
+        // Инициализация таблицы
+        if (courierOrdersTable) {
+            courierOrdersTable.replaceData(data);
+        } else {
+            courierOrdersTable = new Tabulator("#courier-active-table", {
+                data: data,
+                height: "100%",
+                layout: "fitDataStretch",
+                placeholder: "Нет назначенных доставок",
+                columns: [
+                    {title:"ID", field:"order_id", width:60, formatter: (cell) => 
+                        `<a href="/operator/orders/${cell.getValue()}/detail" class="text-blue-600 hover:underline font-medium">#${cell.getValue()}</a>`},
+                    {title:"Клиент", field:"client_name"},
+                    {title:"Телефон", field:"client_phone", width:110},
+                    {title:"Адрес", field:"delivery_address"},
+                    {title:"Вес", field:"total_weight", width:70},
+                    {title:"Статус", field:"status_name", width:100},
+                    {title:"Дата", field:"created_at", width:140}
+                ]
+            });
+        }
+    } catch (e) {
+        console.error("❌ Ошибка загрузки заказов курьера:", e);
+        document.getElementById('courier-active-table').innerHTML = 
+            `<div class="p-4 text-red-600">Ошибка загрузки: ${e.message}</div>`;
+    }
+}
+
+// === Карта маршрута ===
+async function loadCourierMap() {
+    const mapEl = document.getElementById('courier-route-map');
+    if (!mapEl) return;
+
+    // 🔒 Защита от повторной инициализации
+    if (routeMapInstance) return;
+
+    try {
+        const res = await fetch('/courier/api/route', { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP error');
+        const points = await res.json();
+
+        // Если точек нет → показываем заглушку
+        if (points.length === 0) {
+            mapEl.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500 bg-gray-50 rounded">Нет активного маршрута</div>';
+            return;
+        }
+
+        // 🧹 Очищаем контейнер и гарантируем relative-позиционирование
+        mapEl.innerHTML = '';
+        mapEl.classList.add('relative');
+
+        // Инициализация карты с оптимизациями для веб-приложений
+        routeMapInstance = L.map('courier-route-map', { 
+            zoomControl: false,
+            preferCanvas: true,
+            fadeAnimation: false,
+            markerZoomAnimation: false
+        }).setView([points[0].latitude, points[0].longitude], 13);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            maxZoom: 19,
+            updateWhenIdle: true,
+            tileSize: 256
+        }).addTo(routeMapInstance);
+        
+        L.control.zoom({ position: 'topright' }).addTo(routeMapInstance);
+
+        const latlngs = [];
+        
+        points.forEach(p => {
+            if (!p.latitude || !p.longitude) return;
+            latlngs.push([p.latitude, p.longitude]);
+
+            // Маркер с цифрой (чистый CSS, без внешних картинок)
+            const icon = L.divIcon({
+                className: '',
+                html: `<div style="background:#2563eb; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:14px; border:2px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.3);">${p.sequence_num}</div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+
+            const status = p.actual_arrival_time ? '✅ Посещено' : '⏳ В ожидании';
+            const popupContent = `
+                <b>Точка ${p.sequence_num}</b><br>
+                ${p.address || 'Без адреса'}<br>
+                <span class="text-xs text-gray-500">${p.location_type || ''}</span><br>
+                <span class="text-xs font-medium ${p.actual_arrival_time ? 'text-green-600' : 'text-orange-500'}">${status}</span>
+            `;
+            
+            L.marker([p.latitude, p.longitude], { icon })
+                .bindPopup(popupContent)
+                .addTo(routeMapInstance);
+        });
+
+        // Линия маршрута (пунктирная)
+        if (latlngs.length > 1) {
+            L.polyline(latlngs, { 
+                color: '#3B82F6', 
+                weight: 4, 
+                opacity: 0.8, 
+                dashArray: '6, 8' 
+            }).addTo(routeMapInstance);
+        }
+
+        // Автомасштабирование с отступами
+        routeMapInstance.fitBounds(latlngs, { padding: [30, 30] });
+
+        // 🔥 Ключевое: пересчёт размера после рендеринга
+        // Используем whenReady + requestAnimationFrame + setTimeout для гарантии
+        routeMapInstance.whenReady(() => {
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    if (routeMapInstance) {
+                        routeMapInstance.invalidateSize({ animate: false, pan: false });
+                        // Дополнительный fitBounds на случай, если карта "уплыла"
+                        routeMapInstance.fitBounds(latlngs, { padding: [30, 30] });
+                    }
+                }, 150);
+            });
+        });
+
+    } catch (e) {
+        console.error("❌ Ошибка карты курьера:", e);
+        const mapEl = document.getElementById('courier-route-map');
+        if (mapEl) {
+            mapEl.innerHTML = '<div class="h-full flex items-center justify-center text-red-500 bg-gray-50 rounded">Ошибка загрузки карты</div>';
+        }
+    }
+}
+
+// === Единая инициализация после DOM + стилей ===
+document.addEventListener('DOMContentLoaded', () => {
+    // Сначала грузим таблицу (быстро)
+    loadCourierOrders();
+    
+    // Карту инициализируем с небольшой задержкой, чтобы Tailwind применил стили
+    setTimeout(loadCourierMap, 50);
+});
+</script>
+{% endblock %}

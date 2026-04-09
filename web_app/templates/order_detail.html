@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Заказ #{{ order.order_id }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+{% endblock %}
+
+{% block content %}
+<div class="mb-4 flex items-center justify-between">
+    <h1 class="text-2xl font-bold">📦 Заказ #{{ order.order_id }}</h1>
+    <a href="javascript:history.back()" class="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">← Назад</a>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Информация о заказе -->
+    <div class="bg-white p-6 rounded shadow">
+        <h3 class="text-lg font-bold mb-4 border-b pb-2">📋 Детали</h3>
+        <div class="space-y-3 text-sm">
+            <p><span class="font-medium text-gray-600">Клиент:</span> {{ order.client_name }}</p>
+            <p><span class="font-medium text-gray-600">Email:</span> {{ order.client_email }}</p>
+            <p><span class="font-medium text-gray-600">Телефон:</span> {{ order.client_phone }}</p>
+            <p><span class="font-medium text-gray-600">Адрес доставки:</span> {{ order.client_address or '-' }}</p>
+            <p><span class="font-medium text-gray-600">Статус:</span> 
+               <span class="px-2 py-1 rounded bg-blue-100 text-blue-800">{{ order.status_name }}</span>
+            </p>
+            <p><span class="font-medium text-gray-600">Сумма:</span> {{ order.total_price }} ₽</p>
+            <p><span class="font-medium text-gray-600">Создан:</span> {{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+            {% if order.comments %}
+            <p class="bg-yellow-50 p-3 rounded border border-yellow-200 mt-2">
+                <span class="font-medium text-yellow-700">💬 Комментарий:</span><br>{{ order.comments }}
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Информация о доставке + КАРТА -->
+    <div class="bg-white p-6 rounded shadow">
+        <h3 class="text-lg font-bold mb-4 border-b pb-2">🚚 Доставка</h3>
+        {% if delivery %}
+        <div class="space-y-3 text-sm">
+            <p><span class="font-medium text-gray-600">ID доставки:</span> #{{ delivery.delivery_id }}</p>
+            <p><span class="font-medium text-gray-600">Курьер:</span> {{ delivery.courier_name or 'Не назначен' }}</p>
+        </div>
+
+        <!-- Контейнер карты с data-атрибутами (IDE-безопасно) -->
+        <div id="courier-map" class="w-full h-64 rounded mt-4 border z-0"
+             data-courier-lat="{{ delivery.latitude or '' }}"
+             data-courier-lng="{{ delivery.longitude or '' }}"
+             data-delivery-lat="{{ delivery.delivery_lat or '' }}"
+             data-delivery-lng="{{ delivery.delivery_lng or '' }}">
+        </div>
+        {% if delivery.coords_updated_at %}
+            <p class="text-xs text-gray-400 mt-1">📍 Обновление координат: {{ delivery.coords_updated_at.strftime('%H:%M:%S') }}</p>
+        {% endif %}
+
+        {% else %}
+        <div class="w-full h-64 bg-gray-50 rounded mt-4 flex items-center justify-center text-gray-500 text-sm border">
+            Доставка ещё не создана
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Состав заказа -->
+<div class="bg-white p-6 rounded shadow mt-6">
+    <h3 class="text-lg font-bold mb-4">🛒 Товары</h3>
+    {% if items %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+            <thead class="bg-gray-50 text-gray-600">
+                <tr><th class="p-3">Товар</th><th class="p-3">Кол-во</th><th class="p-3">Цена</th><th class="p-3">Сумма</th></tr>
+            </thead>
+            <tbody class="divide-y">
+                {% for item in items %}
+                <tr>
+                    <td class="p-3">{{ item.item_name }}</td>
+                    <td class="p-3">{{ item.ordered_quantity }}</td>
+                    <td class="p-3">{{ item.price }} ₽</td>
+                    <td class="p-3 font-medium">{{ item.subtotal }} ₽</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-500 italic">Список товаров пуст</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const mapEl = document.getElementById('courier-map');
+    if (!mapEl) return;
+
+    // Читаем координаты из data-атрибутов (безопасно для IDE)
+    const cLat = parseFloat(mapEl.dataset.courierLat) || null;
+    const cLng = parseFloat(mapEl.dataset.courierLng) || null;
+    const dLat = parseFloat(mapEl.dataset.deliveryLat) || null;
+    const dLng = parseFloat(mapEl.dataset.deliveryLng) || null;
+
+    const points = [];
+    if (cLat && cLng) points.push([cLat, cLng]);
+    if (dLat && dLng) points.push([dLat, dLng]);
+    if (points.length === 0) return; // Нет точек для отображения
+
+    // Инициализация карты
+    const map = L.map('courier-map', { zoomControl: false }).setView(points[0], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19
+    }).addTo(map);
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    // Кастомные маркеры (чистый CSS, без внешних картинок)
+    const courierIcon = L.divIcon({
+        className: '',
+        html: '<div style="background:#3B82F6;width:16px;height:16px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3)"></div>',
+        iconSize: [16, 16], iconAnchor: [8, 8]
+    });
+    const deliveryIcon = L.divIcon({
+        className: '',
+        html: '<div style="background:#EF4444;width:16px;height:16px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3)"></div>',
+        iconSize: [16, 16], iconAnchor: [8, 8]
+    });
+
+    // Добавляем маркеры
+    if (cLat && cLng) {
+        L.marker([cLat, cLng], { icon: courierIcon }).addTo(map).bindPopup('<b>📍 Курьер</b>');
+    }
+    if (dLat && dLng) {
+        L.marker([dLat, dLng], { icon: deliveryIcon }).addTo(map).bindPopup('<b>🏁 Точка доставки</b>');
+    }
+
+    // Пунктирная линия маршрута
+    if (cLat && cLng && dLat && dLng) {
+        L.polyline([[cLat, cLng], [dLat, dLng]], {
+            color: '#6B7280', weight: 3, dashArray: '5, 10'
+        }).addTo(map);
+    }
+
+    // Автоматический зум, чтобы влезли все точки
+    map.fitBounds(points, { padding: [20, 20] });
+});
+</script>
+{% endblock %}

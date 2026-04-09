@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+{% block title %}Панель оператора{% endblock %}
+{% block content %}
+<div class="mb-4 flex justify-between items-center">
+    <h1 class="text-2xl font-bold">⚙️ Панель оператора</h1>
+    <a href="/profile" class="text-sm text-gray-600 hover:text-blue-600 underline">👤 Обо мне</a>
+</div>
+
+<!-- KPI карточки -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white p-4 rounded shadow"><span class="text-gray-500 text-sm">Новые</span><p class="text-2xl font-bold text-purple-600" id="kpi-new">0</p></div>
+    <div class="bg-white p-4 rounded shadow"><span class="text-gray-500 text-sm">В работе</span><p class="text-2xl font-bold text-blue-600" id="kpi-progress">0</p></div>
+    <div class="bg-white p-4 rounded shadow"><span class="text-gray-500 text-sm">Доставлено</span><p class="text-2xl font-bold text-green-600" id="kpi-done">0</p></div>
+    <div class="bg-white p-4 rounded shadow"><span class="text-gray-500 text-sm">Всего заказов</span><p class="text-2xl font-bold" id="kpi-total">0</p></div>
+</div>
+
+<!-- 1. Таблица заказов -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <div class="flex justify-between items-center mb-3">
+        <h3 class="font-bold text-lg">📋 Все заказы</h3>
+        <a href="/operator/api/orders/export" class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 border border-gray-300 transition">
+            📊 Экспорт CSV
+        </a>
+    </div>
+    <div id="orders-table" class="w-full" style="height: 500px;"></div>
+</div>
+
+<!-- 2. Аналитика (графики друг под другом) -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <h3 class="font-bold mb-3 text-lg">📊 Аналитика</h3>
+    <div class="space-y-6">
+        <div class="bg-gray-50 p-4 rounded w-full">
+            <h4 class="text-sm font-semibold text-gray-600 mb-2">Загрузка курьеров</h4>
+            <div class="w-full h-64"><canvas id="chart-couriers"></canvas></div>
+        </div>
+        <div class="bg-gray-50 p-4 rounded w-full">
+            <h4 class="text-sm font-semibold text-gray-600 mb-2">Распределение заказов по статусам (30 дн.)</h4>
+            <div class="w-full h-64"><canvas id="chart-statuses"></canvas></div>
+        </div>
+        <div class="bg-gray-50 p-4 rounded w-full">
+            <h4 class="text-sm font-semibold text-gray-600 mb-2">Время доставки: SLA-мониторинг (14 дн.)</h4>
+            <div class="w-full h-64"><canvas id="chart-sla"></canvas></div>
+        </div>
+    </div>
+</div>
+
+<!-- 3. Журнал аудита -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <h3 class="font-bold mb-3 text-lg">📜 Журнал действий</h3>
+    <div id="audit-table" class="w-full" style="height: 400px;"></div>
+</div>
+
+<!-- Модальное окно смены статуса -->
+<div id="status-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white p-6 rounded shadow-lg w-80">
+        <h3 class="text-lg font-bold mb-4">Изменить статус заказа</h3>
+        <input type="hidden" id="modal-order-id">
+        <select id="modal-status" class="w-full p-2 border rounded mb-4"></select>
+        <div class="flex justify-end space-x-2">
+            <button onclick="closeStatusModal()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Отмена</button>
+            <button onclick="saveStatus()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Сохранить</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // === Таблица заказов ===
+    let ordersTable;
+    async function loadOrders() {
+        try {
+            const res = await fetch('/operator/api/orders', { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            document.getElementById('kpi-new').textContent = data.filter(o => o.status_name === 'created').length || 0;
+            document.getElementById('kpi-progress').textContent = data.filter(o => o.status_name === 'in_transit').length || 0;
+            document.getElementById('kpi-done').textContent = data.filter(o => o.status_name === 'delivered').length || 0;
+            document.getElementById('kpi-total').textContent = data.length;
+
+            if (ordersTable) {
+                ordersTable.replaceData(data);
+            } else {
+                ordersTable = new Tabulator("#orders-table", {
+                     data,
+                    height: "100%",
+                    layout: "fitDataStretch",
+                    placeholder: "Нет заказов",
+                    columns: [
+                        // 1. ID как ссылка на детальную страницу
+                        {title: "ID", field: "order_id", width: 60, formatter: (cell) => 
+                            `<a href="/operator/orders/${cell.getValue()}/detail" class="text-blue-600 hover:underline font-medium">#${cell.getValue()}</a>`},
+                        {title: "Клиент", field: "client_name"},
+                        {title: "Телефон", field: "client_phone", width: 110},
+                        {title: "Адрес", field: "delivery_location"},
+                        {title: "Сумма", field: "total_price", width: 90},
+                        // 2. Статус: мультифильтр + клик по ячейке
+                        {
+                            title: "Статус", field: "status_name", width: 140,
+                            headerFilter: "list",
+                            headerFilterParams: { multiselect: true, valuesLookup: true, clearable: true },
+                            headerFilterFunc: "in",
+                            cellClick: (e, cell) => {
+                                const row = cell.getRow().getData();
+                                openStatusModal(row.order_id, row.status_id);
+                            }
+                        },
+                        {title: "Дата", field: "created_at", width: 140}
+                    ]
+                });
+            }
+        } catch (e) {
+            console.error("❌ Ошибка загрузки заказов:", e);
+        }
+    }
+
+    // === Модальное окно смены статуса ===
+    async function openStatusModal(orderId, currentStatusId) {
+        document.getElementById('modal-order-id').value = orderId;
+        document.getElementById('status-modal').classList.remove('hidden');
+        
+        const select = document.getElementById('modal-status');
+        if (select.options.length === 0) {
+            try {
+                const res = await fetch('/operator/api/statuses');
+                const statuses = await res.json();
+                select.innerHTML = statuses.map(s => `<option value="${s.id}" ${s.id == currentStatusId ? 'selected' : ''}>${s.name}</option>`).join('');
+            } catch (e) { console.error(e); }
+        } else {
+            select.value = currentStatusId;
+        }
+    }
+
+    function closeStatusModal() { document.getElementById('status-modal').classList.add('hidden'); }
+
+    async function saveStatus() {
+        const id = document.getElementById('modal-order-id').value;
+        const newStatus = document.getElementById('modal-status').value;
+        if (!id || !newStatus) return;
+        try {
+            await fetch(`/operator/api/orders/${id}/status?new_status_id=${newStatus}`, { method: 'PATCH' });
+            closeStatusModal();
+            loadOrders();
+        } catch (e) { console.error(e); }
+    }
+
+    async function deleteOrder(id) {
+        if (!confirm('Удалить заказ? Действие необратимо.')) return;
+        try {
+            await fetch(`/operator/api/orders/${id}`, { method: 'DELETE' });
+            loadOrders();
+        } catch (e) { console.error(e); }
+    }
+
+    // === Графики ===
+    let charts = {};
+    async function renderCharts() {
+        try {
+            const res = await fetch('/operator/api/analytics', { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            // 1. Курьеры (Bar)
+            if (charts.couriers) charts.couriers.destroy();
+
+            const courierIds = data.couriers.map(c => c.id);
+            
+            charts.couriers = new Chart(document.getElementById('chart-couriers'), {
+                type: 'bar',
+                data: { // ✅ ДОБАВЛЕН КЛЮЧ "data:"
+                    labels: data.couriers.map(c => c.name),
+                    datasets: [{ 
+                        label: 'Активные заказы', 
+                        data: data.couriers.map(c => c.active_deliveries), 
+                        backgroundColor: '#60A5FA' 
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    plugins: { legend: { display: false } },
+                    onClick: (evt, elements) => {
+                        if (elements.length > 0) {
+                            const idx = elements[0].index;
+                            const cId = courierIds[idx];
+                            if (cId) window.location.href = `/operator/couriers/${cId}/route`;
+                        }
+                    }
+                }
+            });
+
+            // 2. Распределение по статусам (Doughnut)
+            if (charts.statuses) charts.statuses.destroy();
+            charts.statuses = new Chart(document.getElementById('chart-statuses'), {
+                type: 'doughnut',
+                data: { // ✅ ДОБАВЛЕН КЛЮЧ "data:"
+                    labels: data.statuses.map(s => s.status_name),
+                    datasets: [{ 
+                        data: data.statuses.map(s => s.cnt),
+                        backgroundColor: ['#60A5FA', '#34D399', '#FBBF24', '#F87171', '#A78BFA', '#94A3B8']
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+
+            // 3. SLA-мониторинг (Line + целевая линия)
+            const slaLabels = data.sla.map(s => s.order_date);
+            const slaValues = data.sla.map(s => s.avg_hours ? parseFloat(s.avg_hours).toFixed(1) : null);
+            const targetSLA = slaLabels.map(() => 4.0); // Цель: 4 часа
+
+            if (charts.sla) charts.sla.destroy();
+            charts.sla = new Chart(document.getElementById('chart-sla'), {
+                type: 'line',
+                data: { // ✅ ДОБАВЛЕН КЛЮЧ "data:"
+                    labels: slaLabels,
+                    datasets: [
+                        { 
+                            label: 'Факт (часы)', 
+                            data: slaValues, 
+                            borderColor: '#34D399', 
+                            backgroundColor: 'rgba(52, 211, 153, 0.2)', 
+                            fill: true, 
+                            tension: 0.3 
+                        },
+                        { 
+                            label: 'SLA (4ч)', 
+                            data: targetSLA, 
+                            borderColor: '#EF4444', 
+                            borderDash: [5, 5], 
+                            pointRadius: 0, 
+                            fill: false 
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Часы' } } }
+                }
+            });
+        } catch (e) { console.error("❌ Ошибка графиков:", e); }
+    }
+
+    // === Журнал аудита ===
+    let auditTable;
+    async function loadAuditTable() {
+        try {
+            const res = await fetch('/operator/api/audit');
+            if (!res.ok) throw new Error('API вернул ошибку');
+            const data = await res.json();
+
+            if (auditTable) {
+                auditTable.replaceData(data);
+            } else {
+                auditTable = new Tabulator("#audit-table", {
+                     data,
+                    height: "100%",
+                    layout: "fitDataStretch",
+                    columns: [
+                        {title: "Время", field: "changed_at"},
+                        {title: "Пользователь", field: "user_name"},
+                        {title: "Таблица", field: "table_name"},
+                        {title: "ID записи", field: "record_id"},
+                        {title: "Действие", field: "action"},
+                        {title: "Старые значения", field: "old_values"}, 
+                        {title: "Новые значения", field: "new_values"} 
+                    ]
+                });
+            }
+        } catch (e) {
+            console.error("❌ Ошибка загрузки аудита:", e);
+        }
+    }
+
+    // === Инициализация ===
+    document.addEventListener('DOMContentLoaded', () => {
+        // Запускаем независимо: если один упадёт, остальные продолжат работать
+        loadOrders();
+        renderCharts();
+        loadAuditTable();
+    });
+</script>
+{% endblock %}

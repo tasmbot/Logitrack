@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Маршрут: {{ courier_name }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    #courier-map .leaflet-container { width: 100% !important; height: 100% !important; border-radius: 0.375rem; }
+    .leaflet-marker-icon { background: none !important; border: none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mb-4 flex items-center justify-between">
+    <h1 class="text-2xl font-bold">🚚 Курьер: {{ courier_name }}</h1>
+    <a href="/dashboard/operator" class="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">← Назад</a>
+</div>
+
+<!-- Таблица заказов курьера -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <h3 class="font-bold mb-3 text-lg">📋 Активные заказы курьера</h3>
+    <div id="courier-orders-table" style="height: 400px;"></div>
+</div>
+
+<!-- Карта маршрута -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <h3 class="font-bold mb-3 text-lg">🗺️ Карта маршрута</h3>
+    <div id="courier-map" style="height: 450px; width: 100%;" class="rounded border z-0 relative"></div>
+    <p class="text-xs text-gray-400 mt-2">📍 Точки маршрута отображаются в порядке посещения</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- 🟢 БЕЗОПАСНЫЙ ПЕРЕНОС ДАННЫХ (IDE не ругается, так как тип JSON) -->
+<script id="server-data" type="application/json">
+    {{ {"orders": orders, "points": points} | tojson }}
+</script>
+
+<script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // 🔹 Чтение данных из JSON-блока (валидный JS, нет ошибок линтера)
+    const initData = JSON.parse(document.getElementById('server-data').textContent);
+    const ORDERS_DATA = initData.orders || [];
+    const ROUTE_POINTS = initData.points || [];
+
+    // === 1. Таблица заказов ===
+    let courierTable;
+    courierTable = new Tabulator("#courier-orders-table", {
+         ORDERS_DATA,
+        height: "100%", 
+        layout: "fitColumns", 
+        placeholder: "Нет заказов",
+        columns: [
+            {title:"ID", field:"order_id", width:60, formatter: (cell) => 
+                `<a href="/operator/orders/${cell.getValue()}/detail" class="text-blue-600 hover:underline font-medium">#${cell.getValue()}</a>`},
+            {title:"Клиент", field:"client_name"},
+            {title:"Телефон", field:"client_phone", width:110},
+            {title:"Адрес", field:"delivery_address"},
+            {title:"Вес", field:"total_weight", width:70},
+            {title:"Статус", field:"status_name", width:100},
+            {title:"Дата", field:"created_at", width:140}
+        ]
+    });
+
+    // === 2. Карта маршрута ===
+    const mapEl = document.getElementById('courier-map');
+    if (!mapEl || ROUTE_POINTS.length === 0) {
+        mapEl.innerHTML = '<div class="h-full flex items-center justify-center text-gray-500 bg-gray-50">Нет активного маршрута</div>';
+        return;
+    }
+
+    const map = L.map('courier-map', { zoomControl: false }).setView([ROUTE_POINTS[0].latitude, ROUTE_POINTS[0].longitude], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19
+    }).addTo(map);
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    const latlngs = [];
+    ROUTE_POINTS.forEach(p => {
+        if (!p.latitude || !p.longitude) return;
+        latlngs.push([p.latitude, p.longitude]);
+        
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="background:#2563eb; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:14px; border:2px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.3);">${p.sequence_num}</div>`,
+            iconSize: [28, 28], iconAnchor: [14, 14]
+        });
+        
+        const status = p.actual_arrival_time ? '✅ Посещено' : '⏳ В ожидании';
+        L.marker([p.latitude, p.longitude], { icon })
+            .bindPopup(`<b>Точка ${p.sequence_num}</b><br>${p.address || 'Без адреса'}<br><span class="text-xs text-orange-500 font-medium">${status}</span>`)
+            .addTo(map);
+    });
+
+    if (latlngs.length > 1) {
+        L.polyline(latlngs, { color: '#3B82F6', weight: 4, opacity: 0.8, dashArray: '6, 8' }).addTo(map);
+    }
+
+    map.fitBounds(latlngs, { padding: [30, 30] });
+    setTimeout(() => map.invalidateSize({ animate: false, pan: false }), 150);
+});
+</script>
+{% endblock %}
