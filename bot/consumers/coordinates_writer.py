@@ -55,9 +55,10 @@ async def flush_to_db(records):
     query = f"""
         INSERT INTO delivery_coordinates (delivery_id, latitude, longitude)
         VALUES {placeholders}
-        ON CONFLICT (delivery_id) DO UPDATE SET
-            latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude
-    """
+        """
+        # ON CONFLICT (delivery_id) DO UPDATE SET
+        #     latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude
+    
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(query, *values)

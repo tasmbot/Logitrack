@@ -306,15 +306,21 @@ async def order_detail_page(request: Request, order_id: int):
 
         # 3. Информация о доставке/курьере
         delivery = await conn.fetchrow("""
+            WITH latest_coords AS (
+                SELECT DISTINCT ON (delivery_id) 
+                    delivery_id, latitude, longitude, updated_at
+                FROM delivery_coordinates
+                ORDER BY delivery_id, updated_at DESC
+            )
             SELECT d.delivery_id, u.full_name as courier_name,
                 l.latitude as delivery_lat, l.longitude as delivery_lng,
-                dc.latitude, dc.longitude, dc.updated_at as coords_updated_at
+                lc.latitude, lc.longitude, lc.updated_at as coords_updated_at
             FROM deliveries d
             LEFT JOIN couriers co ON d.courier_id = co.courier_id
             LEFT JOIN users u ON co.user_id = u.user_id
             LEFT JOIN locations l ON d.location_id = l.location_id
-            LEFT JOIN delivery_coordinates dc ON d.delivery_id = dc.delivery_id
-            WHERE d.order_id = $1
+            LEFT JOIN latest_coords lc ON d.delivery_id = lc.delivery_id
+            WHERE d.order_id = $1;
         """, order_id)
 
     return request.app.state.templates.TemplateResponse(

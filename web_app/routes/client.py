@@ -110,7 +110,7 @@ async def submit_order(request: Request):
         if not loc:
             type_id_res = await conn.fetchrow("SELECT location_type_id FROM location_types WHERE location_type = 'delivery_point'")
             if not type_id_res: raise HTTPException(status_code=500, detail="Нет типа локации")
-            lat, lng = round(random.uniform(40.0, 60.0), 6), round(random.uniform(30.0, 50.0), 6)
+            lat, lng = round(random.uniform(55.0, 56.0), 6), round(random.uniform(36.0, 37.0), 6)
             loc = await conn.fetchrow(
                 "INSERT INTO locations (location_type_id, address, latitude, longitude) VALUES ($1, $2, $3, $4) RETURNING location_id",
                 type_id_res["location_type_id"], address, lat, lng

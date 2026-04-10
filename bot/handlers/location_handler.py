@@ -46,8 +46,17 @@ async def handle_location_update(update: Update, context: ContextTypes.DEFAULT_T
 async def _send_coords_to_kafka(update: Update, context: ContextTypes.DEFAULT_TYPE, loc):
     """Внутренняя функция отправки в Kafka (вызывается только при active=True)"""
     delivery_id = FlowManager.get_delivery(context)
-    courier_id = context.user_data.get("courier_id")  # или из FlowManager
+    # courier_id = context.user_data.get("courier_id")  # или из FlowManager
+    courier_id = FlowManager.get_courier_id(context)
     producer = context.bot_data.get("kafka_producer")
+
+    if courier_id is None:
+        # Вариант А: взять из сессии Telegram (если курьер логинился в боте)
+        courier_id = context.user_data.get("courier_id")
+        
+    if courier_id is None:
+        logger.warning("⚠️ courier_id отсутствует в контексте. Координата будет сохранена без привязки к курьеру.")
+ 
 
     if not producer or not delivery_id:
         return
