@@ -1,16 +1,21 @@
 # routes/operator.py
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
-from config import ROLE_NAMES
+from pydantic import BaseModel
 from datetime import datetime
 from decimal import Decimal
 import json
 import csv
 import io
+import logging
 
 from core.db import get_pool
 
 router = APIRouter(prefix="/operator", tags=["Оператор"])
+logger = logging.getLogger(__name__)
+
+class RouteReorderRequest(BaseModel):
+    new_order: list[int]
 
 def _serialize_for_json(data):
     """
@@ -172,39 +177,46 @@ async def export_orders_csv(request: Request):
 async def operator_courier_route_page(request: Request, courier_id: int):
     _ensure_operator(request)
     pool = get_pool(request)
-    if not pool: raise HTTPException(status_code=503)
+    if not pool: raise HTTPException(status_code=503, detail="БД недоступна")
 
     async with pool.acquire() as conn:
-        courier_info = await conn.fetchrow("SELECT u.full_name FROM couriers c JOIN users u ON c.user_id = u.user_id WHERE c.courier_id = $1", courier_id)
-        if not courier_info: raise HTTPException(status_code=404, detail="Курьер не найден")
+        courier_info = await conn.fetchrow(
+            "SELECT u.full_name FROM couriers c JOIN users u ON c.user_id = u.user_id WHERE c.courier_id = $1",
+            courier_id
+        )
+        if not courier_info:
+            raise HTTPException(status_code=404, detail="Курьер не найден")
 
-        # Активный маршрут
         delivery = await conn.fetchrow("""
-            SELECT d.delivery_id, r.route_id FROM deliveries d
-            JOIN routes r ON d.route_id = r.route_id
+            SELECT d.delivery_id, r.route_id 
+            FROM deliveries d JOIN routes r ON d.route_id = r.route_id
             WHERE d.courier_id = $1 AND d.actual_delivery_datetime IS NULL
-            ORDER BY d.updated_at DESC LIMIT 1
+            ORDER BY 1 DESC LIMIT 1
         """, courier_id)
 
-
+        points = []
         if delivery:
             points = await conn.fetch("""
-                SELECT rp.sequence_num, l.address, l.latitude::float AS latitude, 
-                       l.longitude::float AS longitude, lt.location_type,
-                       rp.expected_arrival_time, rp.actual_arrival_time
+                SELECT 
+                    rp.sequence_num,
+                    l.location_id,
+                    l.address,
+                    l.latitude::float AS latitude, 
+                    l.longitude::float AS longitude,
+                    lt.location_type,
+                    rp.expected_arrival_time, 
+                    rp.actual_arrival_time
                 FROM route_points rp
                 JOIN locations l ON rp.location_id = l.location_id
                 JOIN location_types lt ON l.location_type_id = lt.location_type_id
-                WHERE rp.route_id = $1 ORDER BY rp.sequence_num
+                WHERE rp.route_id = $1
+                ORDER BY rp.sequence_num
             """, delivery["route_id"])
-        else:
-            points = []
 
-        # Заказы этого курьера
         orders = await conn.fetch("""
             SELECT o.order_id, u.full_name AS client_name, u.phone AS client_phone,
                    l.address AS delivery_address, COALESCE(o.total_weight, 0) AS total_weight,
-                   s.status_name, o.created_at
+                   s.status_name, to_char(o.created_at, 'DD-MM-YYYY HH24:MI') AS created_at
             FROM deliveries d
             JOIN orders o ON d.order_id = o.order_id
             JOIN statuses s ON o.status_id = s.status_id
@@ -212,19 +224,25 @@ async def operator_courier_route_page(request: Request, courier_id: int):
             JOIN users u ON c.user_id = u.user_id
             LEFT JOIN locations l ON d.location_id = l.location_id
             WHERE d.courier_id = $1
-            ORDER BY o.created_at DESC LIMIT 50
+              AND s.status_name IN ('created', 'in_transit', 'assigned', 'on_the_way')
+            ORDER BY o.created_at DESC
         """, courier_id)
-        
-        return request.app.state.templates.TemplateResponse(
+
+    route_id = delivery["route_id"] if delivery else None
+
+    # сериализуем datetime/Decimal перед передачей в шаблон
+    return request.app.state.templates.TemplateResponse(
         "operator_courier_view.html",
         {
             "request": request,
             "courier_name": courier_info["full_name"],
             "courier_id": courier_id,
-            "orders": _serialize_for_json([dict(o) for o in orders]),  
-            "points": _serialize_for_json([dict(p) for p in points])    
+            "route_id": route_id,
+            "orders": _serialize_for_json([dict(o) for o in orders]),
+            "points": _serialize_for_json([dict(p) for p in points])
         }
     )
+
 
 @router.get("/api/audit")
 async def get_audit_log(request: Request, limit: int = 50):
@@ -332,3 +350,47 @@ async def order_detail_page(request: Request, order_id: int):
             "delivery": dict(delivery) if delivery else None
         }
     )
+    
+@router.patch("/routes/{route_id}/reorder")
+async def reorder_route_points(
+    request: Request,
+    route_id: int,
+    body: RouteReorderRequest
+):
+    _ensure_operator(request)
+    pool = get_pool(request)
+    if not pool:
+        raise HTTPException(status_code=503, detail="БД недоступна")
+
+    new_order = body.new_order
+    if not new_order:
+        raise HTTPException(status_code=400, detail="Пустой список точек")
+
+    async with pool.acquire() as conn:
+        delivery = await conn.fetchrow("""
+            SELECT d.courier_id, c.user_id as courier_user_id
+            FROM deliveries d JOIN couriers c ON d.courier_id = c.courier_id
+            WHERE d.route_id = $1 AND d.actual_delivery_datetime IS NULL LIMIT 1
+        """, route_id)
+
+        if not delivery:
+            raise HTTPException(status_code=404, detail="Маршрут не найден или доставка завершена")
+
+        courier_user_id = delivery["courier_user_id"]
+
+        # 🔒 Атомарное обновление без конфликтов UNIQUE(route_id, sequence_num)
+        async with conn.transaction():
+            # 1. Временно сдвигаем все sequence_num, чтобы избежать дубликатов при перезаписи
+            await conn.execute(
+                "UPDATE route_points SET sequence_num = sequence_num + 10000 WHERE route_id = $1",
+                route_id
+            )
+            # 2. Присваиваем новые порядковые номера (1, 2, 3...) по location_id
+            for idx, loc_id in enumerate(new_order, start=1):
+                await conn.execute(
+                    "UPDATE route_points SET sequence_num = $1 WHERE route_id = $2 AND location_id = $3",
+                    idx, route_id, loc_id
+                )
+
+    return {"status": "ok", "message": "Порядок точек успешно обновлён"}
+

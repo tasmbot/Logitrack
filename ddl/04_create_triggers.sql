@@ -66,10 +66,8 @@ ALTER FUNCTION public.check_sequence_positive()
 -- DROP FUNCTION IF EXISTS public.check_stock_on_delivery();
 
 CREATE OR REPLACE FUNCTION public.check_stock_on_delivery()
-    RETURNS trigger
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE NOT LEAKPROOF
+RETURNS trigger
+LANGUAGE 'plpgsql'
 AS $BODY$
 DECLARE
     v_store_location_id INT;
@@ -77,36 +75,42 @@ DECLARE
     v_ordered_qty INT;
     v_available_qty INT;
 BEGIN
-    -- Находим магазин (первая точка маршрута с типом 'store')
-    SELECT rp.location_id
-    INTO v_store_location_id
-    FROM public.route_points rp
-    JOIN public.locations l ON rp.location_id = l.location_id
-    JOIN public.location_types lt ON l.location_type_id = lt.location_type_id
-    WHERE rp.route_id = NEW.route_id
-      AND rp.sequence_num = 1
-      AND lt.location_type = 'store'
-    LIMIT 1;
+    -- 1. Берём магазин из явно заданной колонки (быстро и надёжно)
+    v_store_location_id := NEW.pickup_location_id;
 
+    -- 2. Фолбэк для старых записей, если колонка вдруг NULL
     IF v_store_location_id IS NULL THEN
-        RAISE EXCEPTION 'Не найден магазин для маршрута %', NEW.route_id;
+        SELECT rp.location_id
+        INTO v_store_location_id
+        FROM public.route_points rp
+        JOIN public.locations l ON rp.location_id = l.location_id
+        JOIN public.location_types lt ON l.location_type_id = lt.location_type_id
+        WHERE rp.route_id = NEW.route_id
+          AND rp.sequence_num = 1
+          AND lt.location_type = 'store'
+        LIMIT 1;
     END IF;
 
-    -- Проверяем каждый товар в заказе
-    FOR v_item_id, v_ordered_qty IN
-        SELECT item_id, ordered_quantity
-        FROM public.order_items
-        WHERE order_id = NEW.order_id
-    LOOP
-        SELECT COALESCE(quantity, 0)
-        INTO v_available_qty
-        FROM public.store_stock
-        WHERE location_id = v_store_location_id
-          AND item_id = v_item_id;
+    -- 3. Если магазин всё ещё не найден → понятная ошибка
+    IF v_store_location_id IS NULL THEN
+        RAISE EXCEPTION 'Не найден магазин для маршрута %. Убедитесь, что в deliveries указан pickup_location_id или route_points содержит точку типа store.', NEW.route_id;
+    END IF;
 
-        IF v_available_qty IS NULL OR v_available_qty < v_ordered_qty THEN
+    -- 4. Проверка остатков (оптимизировано)
+    FOR v_item_id, v_ordered_qty IN
+        SELECT oi.item_id, oi.ordered_quantity
+        FROM public.order_items oi
+        WHERE oi.order_id = NEW.order_id
+    LOOP
+        SELECT COALESCE(ss.quantity, 0)
+        INTO v_available_qty
+        FROM public.store_stock ss
+        WHERE ss.location_id = v_store_location_id
+          AND ss.item_id = v_item_id;
+
+        IF v_available_qty < v_ordered_qty THEN
             RAISE EXCEPTION 'Недостаточно товара (item_id=%) в магазине (location_id=%). Доступно: %, Запрошено: %',
-                v_item_id, v_store_location_id, COALESCE(v_available_qty, 0), v_ordered_qty;
+                v_item_id, v_store_location_id, v_available_qty, v_ordered_qty;
         END IF;
     END LOOP;
 

@@ -1,7 +1,11 @@
 # handlers/tracking_handler.py
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+import logging
+
 from core.context import FlowManager
+
+logger = logging.getLogger(__name__)
 
 async def start_tracking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -40,31 +44,76 @@ async def complete_order_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
 
-    delivery_id = int(query.data.replace("order:complete:", ""))
-    
-    # Обновляем статус заказа на "завершён" (зависит от вашей БД, обычно status_id=3)
+    # 🔹 Безопасный парсинг delivery_id
+    try:
+        delivery_id = int(query.data.split(":")[-1])
+    except (ValueError, IndexError):
+        await query.edit_message_text("⚠️ Ошибка формата запроса. Попробуйте снова.")
+        return
+
     pool = context.bot_data.get("db_pool")
-    if pool:
-        try:
-            async with pool.acquire() as conn:
-                # Получаем status_id для 'delivered'
-                status_id = await conn.fetchval("SELECT status_id FROM statuses WHERE status_name = 'delivered'")
+    courier_id = FlowManager.get_courier_id(context)
+
+    if not pool:
+        await query.edit_message_text("❌ Ошибка подключения к БД.")
+        return
+    if not courier_id:
+        await query.edit_message_text("⚠️ Сессия курьера не найдена. Перезайдите в бот.")
+        return
+
+    try:
+        async with pool.acquire() as conn:
+            # 🟢 Атомарная транзакция: всё или ничего
+            async with conn.transaction():
+                # 1. Проверка существования, владения и статуса
+                delivery = await conn.fetchrow("""
+                    SELECT d.courier_id, d.actual_delivery_datetime, o.order_id
+                    FROM deliveries d
+                    JOIN orders o ON d.order_id = o.order_id
+                    WHERE d.delivery_id = $1
+                """, delivery_id)
+
+                if not delivery:
+                    await query.edit_message_text("⚠️ Доставка не найдена в системе.")
+                    return
+                if delivery["actual_delivery_datetime"]:
+                    await query.edit_message_text("ℹ️ Этот заказ уже был завершён ранее.")
+                    return
+                if delivery["courier_id"] != courier_id:
+                    await query.edit_message_text("⚠️ Этот заказ не закреплён за вами.")
+                    return
+
+                # 2. Фиксация времени доставки (используем серверное время БД)
+                await conn.execute("""
+                    UPDATE deliveries
+                    SET actual_delivery_datetime = CURRENT_TIMESTAMP
+                    WHERE delivery_id = $1
+                """, delivery_id)
+
+                # 3. Обновление статуса заказа на "Доставлен"
+                status_id = await conn.fetchval("""
+                    SELECT status_id FROM statuses WHERE status_name = 'delivered' LIMIT 1
+                """)
                 if status_id:
-                    await conn.execute(
-                        "UPDATE orders SET status_id = $1 WHERE order_id = (SELECT order_id FROM deliveries WHERE delivery_id = $2)",
-                        status_id, delivery_id
-                    )
-        except Exception as e:
-            print(f"❌ Ошибка обновления статуса: {e}")
+                    await conn.execute("""
+                        UPDATE orders SET status_id = $1 WHERE order_id = $2
+                    """, status_id, delivery["order_id"])
 
-    # Сбрасываем состояние отслеживания
-    FlowManager.reset_delivery_state(context)
+        # 4. Сброс локального состояния курьера
+        FlowManager.set_tracking_active(context, False)
+        FlowManager.set_location_shared(context, False)
+        FlowManager.set_delivery(context, None)
 
-    await query.edit_message_text(
-        f"✅ Заказ #{delivery_id} завершён!\n"
-        f"📍 Отслеживание остановлено. Спасибо за работу!",
-        reply_markup=None  # Убираем кнопки
-    )
+        # 5. Подтверждение
+        await query.edit_message_text(
+            f"✅ Заказ #{delivery['order_id']} успешно завершён!\n"
+            f"📅 Время доставки зафиксировано в системе.\n"
+            f"📦 Перейдите в меню, чтобы взять новый заказ."
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка завершения заказа #{delivery_id}: {e}")
+        await query.edit_message_text("❌ Не удалось завершить заказ. Проверьте связь или обратитесь к диспетчеру.")
 
 # === Остановка отслеживания (без завершения заказа) ===
 async def stop_tracking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -27,6 +27,33 @@
     <div id="courier-map" style="height: 450px; width: 100%;" class="rounded border z-0 relative"></div>
     <p class="text-xs text-gray-400 mt-2">📍 Точки маршрута отображаются в порядке посещения</p>
 </div>
+
+<!-- Блок редактирования маршрута -->
+<div class="bg-white p-4 rounded shadow mb-6">
+    <h3 class="font-bold mb-3 text-lg">✏️ Редактирование порядка точек</h3>
+    <p class="text-sm text-gray-500 mb-3">Перетащите пункты в нужном порядке и нажмите «Сохранить»</p>
+    
+    <ul id="route-points-list" data-route-id="{{ route_id }}" class="space-y-2 max-h-64 overflow-y-auto p-2 bg-gray-50 rounded border">
+        {% for point in points %}
+        <li data-location-id="{{ point.location_id }}" class="flex items-center justify-between p-3 bg-white rounded shadow-sm cursor-grab active:cursor-grabbing border hover:bg-blue-50 transition">
+            <div class="flex items-center gap-3">
+                <span class="text-lg font-bold text-gray-400 w-8 text-center">{{ point.sequence_num }}</span>
+                <div>
+                    <p class="font-medium text-sm">{{ point.address or 'Без адреса' }}</p>
+                    <span class="text-xs text-gray-500">{{ point.location_type }}</span>
+                </div>
+            </div>
+            <span class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">#{{ point.sequence_num }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+
+    <div class="mt-4 flex justify-end">
+        <button id="save-route-order" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition disabled:opacity-50" disabled>
+            💾 Сохранить порядок
+        </button>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -39,18 +66,18 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // 🔹 Чтение данных из JSON-блока (валидный JS, нет ошибок линтера)
     const initData = JSON.parse(document.getElementById('server-data').textContent);
     const ORDERS_DATA = initData.orders || [];
     const ROUTE_POINTS = initData.points || [];
 
+    console.log("📦 Загружено заказов:", ORDERS_DATA.length); // Отладка
+
     // === 1. Таблица заказов ===
-    let courierTable;
-    courierTable = new Tabulator("#courier-orders-table", {
-         ORDERS_DATA,
-        height: "100%", 
-        layout: "fitColumns", 
-        placeholder: "Нет заказов",
+    let courierTable = new Tabulator("#courier-orders-table", {
+        data: ORDERS_DATA, // 🔑 ИСПРАВЛЕНО: было просто ORDERS_DATA,
+        height: "100%",
+        layout: "fitColumns",
+        placeholder: "Нет активных заказов",
         columns: [
             {title:"ID", field:"order_id", width:60, formatter: (cell) => 
                 `<a href="/operator/orders/${cell.getValue()}/detail" class="text-blue-600 hover:underline font-medium">#${cell.getValue()}</a>`},
@@ -80,13 +107,11 @@ document.addEventListener('DOMContentLoaded', () => {
     ROUTE_POINTS.forEach(p => {
         if (!p.latitude || !p.longitude) return;
         latlngs.push([p.latitude, p.longitude]);
-        
         const icon = L.divIcon({
             className: '',
             html: `<div style="background:#2563eb; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:14px; border:2px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.3);">${p.sequence_num}</div>`,
             iconSize: [28, 28], iconAnchor: [14, 14]
         });
-        
         const status = p.actual_arrival_time ? '✅ Посещено' : '⏳ В ожидании';
         L.marker([p.latitude, p.longitude], { icon })
             .bindPopup(`<b>Точка ${p.sequence_num}</b><br>${p.address || 'Без адреса'}<br><span class="text-xs text-orange-500 font-medium">${status}</span>`)
@@ -101,4 +126,63 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => map.invalidateSize({ animate: false, pan: false }), 150);
 });
 </script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const listEl = document.getElementById('route-points-list');
+    const saveBtn = document.getElementById('save-route-order');
+    if (!listEl || !saveBtn) return;
+
+    // Инициализация Drag-and-Drop
+    const sortable = new Sortable(listEl, {
+        animation: 150,
+        handle: '.cursor-grab',
+        onEnd: () => { saveBtn.disabled = false; }
+    });
+
+    // Отправка нового порядка
+    saveBtn.addEventListener('click', async () => {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '⏳ Сохранение...';
+
+        // 🔑 Исправление: читаем route_id из data-атрибута, а не парсим URL
+        const routeId = document.getElementById('route-points-list').dataset.routeId;
+        if (!routeId) {
+            alert("⚠️ Активный маршрут не найден. Возможно, доставка уже завершена.");
+            saveBtn.disabled = false;
+            saveBtn.textContent = '💾 Сохранить порядок';
+            return;
+        }
+
+        const newOrder = Array.from(listEl.children)
+            .map(li => parseInt(li.dataset.locationId, 10))
+            .filter(id => Number.isInteger(id) && id > 0);
+
+        if (newOrder.length === 0) {
+            alert("⚠️ Ошибка: не удалось определить ID точек.");
+            saveBtn.disabled = false;
+            saveBtn.textContent = '💾 Сохранить порядок';
+            return;
+        }
+
+        try {
+            const res = await fetch(`/operator/routes/${routeId}/reorder`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_order: newOrder })
+            });
+
+            if (!res.ok) throw new Error((await res.json()).detail || `HTTP ${res.status}`);
+            
+            alert('✅ Порядок точек обновлён!');
+            location.reload();
+        } catch (e) {
+            alert(`❌ Ошибка: ${e.message}`);
+            saveBtn.disabled = false;
+            saveBtn.textContent = '💾 Сохранить порядок';
+        }
+    });
+});
+</script>
+
 {% endblock %}
