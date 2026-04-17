@@ -108,7 +108,7 @@ async def get_courier_orders(request: Request):
         rows = await conn.fetch("""
             SELECT 
                 o.order_id,
-                u.full_name AS client_name,
+                CONCAT(u.first_name, ' ', u.last_name) AS client_name,
                 u.phone AS client_phone,
                 l.address AS delivery_address,
                 COALESCE(o.total_weight, 0) AS total_weight,

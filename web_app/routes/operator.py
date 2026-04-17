@@ -46,7 +46,7 @@ async def get_orders(request: Request):
     
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT o.order_id, u.full_name as client_name, u.phone as client_phone,
+            SELECT o.order_id, CONCAT(u.first_name, ' ', u.last_name) as client_name, u.phone as client_phone,
                    l.address as delivery_location, o.total_price, s.status_name, s.status_id,
                    to_char(o.created_at, 'DD-MM-YYYY HH24:MI') as created_at
             FROM orders o
@@ -103,14 +103,14 @@ async def get_analytics(request: Request):
     async with pool.acquire() as conn:
         # 1. Загрузка курьеров
         couriers = await conn.fetch("""
-            SELECT c.courier_id, u.full_name as name, COUNT(d.delivery_id) as active_deliveries
+            SELECT c.courier_id, CONCAT(u.first_name, ' ', u.last_name) as name, COUNT(d.delivery_id) as active_deliveries
             FROM couriers c
             JOIN users u ON c.user_id = u.user_id
             LEFT JOIN deliveries d ON c.courier_id = d.courier_id
             LEFT JOIN orders o ON d.order_id = o.order_id
             LEFT JOIN statuses s ON o.status_id = s.status_id
             WHERE s.status_name IN ('created', 'in_transit')
-            GROUP BY c.courier_id, u.full_name
+            GROUP BY c.courier_id, CONCAT(u.first_name, ' ', u.last_name)
             ORDER BY active_deliveries DESC
             LIMIT 7
         """)
@@ -149,7 +149,7 @@ async def export_orders_csv(request: Request):
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT o.order_id, u.full_name as client_name, u.phone as client_phone,
+            SELECT o.order_id, CONCAT(u.first_name, ' ', u.last_name) as client_name, u.phone as client_phone,
                    l.address as delivery_location, o.total_price, s.status_name, o.created_at
             FROM orders o
             JOIN clients c ON o.client_id = c.client_id
@@ -181,7 +181,7 @@ async def operator_courier_route_page(request: Request, courier_id: int):
 
     async with pool.acquire() as conn:
         courier_info = await conn.fetchrow(
-            "SELECT u.full_name FROM couriers c JOIN users u ON c.user_id = u.user_id WHERE c.courier_id = $1",
+            "SELECT CONCAT(u.first_name, ' ', u.last_name) as full_name FROM couriers c JOIN users u ON c.user_id = u.user_id WHERE c.courier_id = $1",
             courier_id
         )
         if not courier_info:
@@ -214,7 +214,7 @@ async def operator_courier_route_page(request: Request, courier_id: int):
             """, delivery["route_id"])
 
         orders = await conn.fetch("""
-            SELECT o.order_id, u.full_name AS client_name, u.phone AS client_phone,
+            SELECT o.order_id, CONCAT(u.first_name, ' ', u.last_name) AS client_name, u.phone AS client_phone,
                    l.address AS delivery_address, COALESCE(o.total_weight, 0) AS total_weight,
                    s.status_name, to_char(o.created_at, 'DD-MM-YYYY HH24:MI') AS created_at
             FROM deliveries d
@@ -253,7 +253,7 @@ async def get_audit_log(request: Request, limit: int = 50):
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT to_char(a.changed_at, 'DD-MM-YYYY HH24:MI') as changed_at, u.full_name as user_name, a.table_name, 
+            SELECT to_char(a.changed_at, 'DD-MM-YYYY HH24:MI') as changed_at, CONCAT(u.first_name, ' ', u.last_name) as user_name, a.table_name, 
                    a.record_id, a.action, a.old_values, a.new_values
             FROM audit_log a
             LEFT JOIN users u ON a.user_id = u.user_id
@@ -303,7 +303,7 @@ async def order_detail_page(request: Request, order_id: int):
         # 1. Основная информация
         order = await conn.fetchrow("""
             SELECT o.order_id, o.total_price, o.comments, o.created_at, o.updated_at,
-                   u.full_name as client_name, u.email as client_email, u.phone as client_phone,
+                   CONCAT(u.first_name, ' ', u.last_name) as client_name, u.email as client_email, u.phone as client_phone,
                    s.status_name, cl.address as client_address
             FROM orders o
             JOIN clients cl ON o.client_id = cl.client_id
@@ -330,7 +330,7 @@ async def order_detail_page(request: Request, order_id: int):
                 FROM delivery_coordinates
                 ORDER BY delivery_id, updated_at DESC
             )
-            SELECT d.delivery_id, u.full_name as courier_name,
+            SELECT d.delivery_id, CONCAT(u.first_name, ' ', u.last_name) as courier_name,
                 l.latitude as delivery_lat, l.longitude as delivery_lng,
                 lc.latitude, lc.longitude, lc.updated_at as coords_updated_at
             FROM deliveries d

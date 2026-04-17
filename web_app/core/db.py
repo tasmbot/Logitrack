@@ -21,7 +21,8 @@ async def setup_db(application):
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
                     email TEXT UNIQUE NOT NULL,
-                    full_name TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
                     phone TEXT,
                     password_hash TEXT NOT NULL,
                     role_id INTEGER DEFAULT 4,

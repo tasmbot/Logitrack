@@ -116,10 +116,10 @@ async def handle_reg_email(update: Update, context: ContextTypes.DEFAULT_TYPE, e
     )
 
 
-async def handle_reg_fullname(update: Update, context: ContextTypes.DEFAULT_TYPE, full_name: str):
+async def handle_reg_firstname(update: Update, context: ContextTypes.DEFAULT_TYPE, first_name: str):
     """Обработка ввода полного имени при регистрации."""
     await delete_user_input(update)
-    FlowManager.set_temp_value(context, "temp_full_name", full_name)
+    FlowManager.set_temp_value(context, "temp_first_name", first_name)
     FlowManager.set_flow(context, "reg_phone")
     await update.message.reply_text(
         "📞 Введите *номер телефона*:",
@@ -145,7 +145,8 @@ async def handle_reg_pass(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
     await delete_user_input(update)
     state = FlowManager.get(context)
     email = state.get("temp_email")
-    full_name = state.get("temp_full_name")
+    first_name = state.get("temp_first_name")
+    last_name = state.get("temp_last_name")
     phone = state.get("temp_phone")
     pool = get_pool(context)
     
@@ -165,10 +166,10 @@ async def handle_reg_pass(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO users (email, full_name, phone, password_hash, role_id)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO users (email, first_name, last_name, phone, password_hash, role_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 """,
-                email, full_name, phone, hashed, 3  # role_id=3 → "Курьер"
+                email, first_name, last_name, phone, hashed, 3  # role_id=3 → "Курьер"
             )
         
         FlowManager.set_authenticated(context, True)

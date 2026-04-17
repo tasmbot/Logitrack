@@ -12,13 +12,13 @@ class UserFlowState(TypedDict, total=False):
     # Текущий шаг потока
     flow: Optional[Literal[
         "login_email", "login_pass",
-        "reg_email", "reg_fullname", "reg_phone", "reg_pass",
+        "reg_email", "reg_firstname", "reg_phone", "reg_pass",
         "write_data", "auth_failed"
     ]]
     
     # Временные данные регистрации
     temp_email: str
-    temp_full_name: str
+    temp_first_name: str
     temp_phone: str
     
     # Данные для записи в БД
@@ -97,7 +97,7 @@ class FlowManager:
     def clear_temp_data(context: ContextTypes.DEFAULT_TYPE):
         """Очистка временных данных после завершения потока."""
         state = FlowManager.get(context)
-        for key in ("temp_email", "temp_full_name", "temp_phone", "target_table", "target_cols"):
+        for key in ("temp_email", "temp_first_name", "temp_last_name", "temp_phone", "target_table", "target_cols"):
             state.pop(key, None)  # type: ignore
     
     @staticmethod

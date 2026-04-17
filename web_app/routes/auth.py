@@ -75,7 +75,8 @@ async def register_submit(
     email: str = Form(...),
     password: str = Form(...),
     confirm_password: str = Form(...),
-    full_name: str = Form(...),
+    first_name: str = Form(...),
+    last_name: str = Form(...),
     phone: str = Form(None),
     address: str = Form(None),
     date_of_birth: str = Form(None),
@@ -115,9 +116,9 @@ async def register_submit(
 
             # 4. Создание пользователя
             user = await conn.fetchrow("""
-                INSERT INTO users (email, password_hash, full_name, phone, role_id)
-                VALUES ($1, $2, $3, $4, $5) RETURNING user_id
-            """, email, pwd_hash, full_name, phone or None, role_id)
+                INSERT INTO users (email, password_hash, first_name, last_name, phone, role_id)
+                VALUES ($1, $2, $3, $4, $5, $6) RETURNING user_id
+            """, email, pwd_hash, first_name, last_name, phone or None, role_id)
             
             user_id = user["user_id"]
 

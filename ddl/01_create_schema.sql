@@ -178,16 +178,21 @@ CREATE TABLE IF NOT EXISTS public.store_stock
 
 CREATE TABLE IF NOT EXISTS public.users
 (
-    user_id serial NOT NULL,
-    full_name character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    user_id integer NOT NULL DEFAULT nextval('users_user_id_seq'::regclass),
+    first_name character varying(100) COLLATE pg_catalog."default" NOT NULL,
     email character varying(100) COLLATE pg_catalog."default" NOT NULL,
     phone character varying(20) COLLATE pg_catalog."default",
     password_hash character varying(255) COLLATE pg_catalog."default" NOT NULL,
     role_id integer NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    last_name character varying(100) COLLATE pg_catalog."default",
     CONSTRAINT users_pkey PRIMARY KEY (user_id),
-    CONSTRAINT users_email_key UNIQUE (email)
+    CONSTRAINT users_email_key UNIQUE (email),
+    CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id)
+        REFERENCES public.roles (role_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
 );
 
 CREATE TABLE IF NOT EXISTS public.vehicles

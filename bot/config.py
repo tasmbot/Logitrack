@@ -33,8 +33,8 @@ ALLOWED_TABLES = ["users", "roles", "delivery_coordinates"]
 
 TABLE_SCHEMA = {
     "users": {
-        "read": ["full_name", "email", "phone"],
-        "write": ["full_name", "email", "phone", "password_hash"]  # password будет автоматически захеширован в боте
+        "read": ["first_name", 'last_name', "email", "phone"],
+        "write": ["first_name",'last_name', "email", "phone", "password_hash"]  # password будет автоматически захеширован в боте
     },
     "roles": {
         "read": ["role_id", "role_name", "description"]

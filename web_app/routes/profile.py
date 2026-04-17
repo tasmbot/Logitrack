@@ -25,7 +25,7 @@ async def profile_page(request: Request):
     # Загружаем данные пользователя
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
-            SELECT u.full_name, u.email, u.phone, u.role_id,
+            SELECT u.first_name, u.last_name, u.email, u.phone, u.role_id,
                    c.address, c.date_of_birth, c.sex
             FROM users u
             LEFT JOIN clients c ON u.user_id = c.user_id
@@ -45,7 +45,8 @@ async def profile_page(request: Request):
             "request": request,
             "page_title": "Обо мне",
             "user": {
-                "full_name": row["full_name"],
+                "first_name": row["first_name"],
+                "last_name": row["last_name"],
                 "email": row["email"],
                 "phone": row["phone"] or "",
                 "role_id": row["role_id"],
