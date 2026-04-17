@@ -62,15 +62,17 @@ async def profile_page(request: Request):
 async def profile_update(
     request: Request,
     address: str = Form(...),
+    latitude: str = Form(None),   # поле из виджета DaData
+    longitude: str = Form(None),  # поле из виджета DaData
     date_of_birth: datetime = Form(None),
     sex: str = Form("male"),
     phone: str = Form(None)
 ):
-    """Обновление профиля — только для клиентов (для MVP)."""
+    """Обновление профиля клиента: адрес + координаты из DaData."""
     user_id = request.session.get("user_id")
     role_id = request.session.get("role_id")
     
-    if not user_id or role_id != 4:  # Только клиенты могут редактировать профиль в MVP
+    if not user_id or role_id != 4:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
     
     pool = get_pool(request)
@@ -80,19 +82,41 @@ async def profile_update(
     
     try:
         async with pool.acquire() as conn:
-            # Обновляем телефон в users (если передан)
+            # 1. Обновляем телефон в users
             if phone:
                 await conn.execute(
                     "UPDATE users SET phone = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2",
                     phone, user_id
                 )
             
-            # Обновляем/создаём запись в clients
-            # Сначала проверяем, есть ли запись
-            exists = await conn.fetchval(
-                "SELECT 1 FROM clients WHERE client_id = (SELECT client_id FROM clients WHERE user_id = $1 LIMIT 1)",
-                user_id
+            # 2. Находим или создаём запись в locations
+            lat = float(latitude) if latitude else None
+            lng = float(longitude) if longitude else None
+            
+            loc_type_id = await conn.fetchval(
+                "SELECT location_type_id FROM location_types WHERE location_type = 'delivery_point' LIMIT 1"
             )
+            if not loc_type_id:
+                raise RuntimeError("Тип локации 'delivery_point' не найден")
+
+            location_id = None
+            if lat is not None and lng is not None:
+                # Ищем существующую локацию по строке адреса
+                location_id = await conn.fetchval(
+                    "SELECT location_id FROM locations WHERE address = $1 LIMIT 1",
+                    address
+                )
+            
+            if location_id is None:
+                # Создаём новую локацию (координаты могут быть NULL при ручном вводе)
+                row = await conn.fetchrow("""
+                    INSERT INTO locations (location_type_id, address, latitude, longitude)
+                    VALUES ($1, $2, $3, $4) RETURNING location_id
+                """, loc_type_id, address, lat, lng)
+                location_id = row["location_id"]
+            
+            # 3. Обновляем или создаём запись клиента
+            exists = await conn.fetchval("SELECT 1 FROM clients WHERE user_id = $1", user_id)
             
             if exists:
                 await conn.execute("""
@@ -101,7 +125,6 @@ async def profile_update(
                     WHERE user_id = $4
                 """, address, date_of_birth or None, sex, user_id)
             else:
-                # Создаём новую запись (упрощённо, без location_id для MVP)
                 await conn.execute("""
                     INSERT INTO clients (user_id, address, date_of_birth, sex)
                     VALUES ($1, $2, $3, $4)

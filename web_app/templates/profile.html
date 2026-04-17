@@ -41,10 +41,38 @@
                 <input type="tel" name="phone" value="{{ user.phone }}" 
                        class="mt-1 w-full p-2 border rounded" placeholder="+7...">
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Адрес доставки</label>
-                <input type="text" name="address" value="{{ user.address }}" 
-                       class="mt-1 w-full p-2 border rounded" placeholder="г. Москва, ул...">
+            <!-- Адрес доставки (с виджетом DaData) -->
+            <div class="mb-4">
+                <label for="address-input" class="block text-sm font-medium text-gray-700 mb-1">
+                    Адрес доставки
+                </label>
+                
+                <!-- Контейнер для виджета -->
+                <div id="address-widget-container">
+                    <input 
+                        type="text" 
+                        id="address-input" 
+                        name="address"
+                        value="{{ user.address or '' }}"
+                        placeholder="Начните вводить адрес (например, Москва, Тверская 1)"
+                        class="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        required
+                    >
+                </div>
+                
+                <!-- Скрытые поля для координат -->
+                <input type="hidden" id="address-lat" name="latitude">
+                <input type="hidden" id="address-lon" name="longitude">
+                
+                <!-- Индикатор статуса -->
+                <p id="address-status" class="mt-1 text-xs text-gray-500">
+                    {{ '✅ Адрес верифицирован' if user.address and user.latitude else '💡 Начните вводить адрес для получения подсказок' }}
+                </p>
+                
+                <!-- Предупреждение при ручном вводе -->
+                <p id="address-warning" class="mt-1 text-xs text-orange-600 hidden">
+                    ⚠️ Адрес введён вручную — координаты могут быть неточными
+                </p>
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700">Дата рождения</label>
@@ -74,4 +102,127 @@
         <a href="javascript:history.back()" class="text-blue-600 hover:underline">← Вернуться назад</a>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+/* Простые стили для dropdown */
+.suggestions-dropdown {
+    position: absolute;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    width: 100%;
+}
+.suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+}
+.suggestion-item:hover {
+    background-color: #f5f5f5;
+}
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const $input = document.getElementById('address-input');
+    const $lat = document.getElementById('address-lat');
+    const $lon = document.getElementById('address-lon');
+    const $status = document.getElementById('address-status');
+    const $warning = document.getElementById('address-warning');
+    const $container = document.getElementById('address-widget-container');
+    
+    // Создаём dropdown
+    const $dropdown = document.createElement('div');
+    $dropdown.className = 'suggestions-dropdown';
+    $dropdown.style.display = 'none';
+    $container.style.position = 'relative';
+    $container.appendChild($dropdown);
+    
+    let debounceTimer;
+    
+    // 🔹 Обработчик ввода
+    $input.addEventListener('input', (e) => {
+        const query = e.target.value.trim();
+        
+        clearTimeout(debounceTimer);
+        
+        if (query.length < 3) {
+            $dropdown.style.display = 'none';
+            return;
+        }
+        
+        // Debounce 300ms
+        debounceTimer = setTimeout(async () => {
+            try {
+                const response = await fetch(`/api/addresses/suggest?query=${encodeURIComponent(query)}&count=5`);
+                if (!response.ok) throw new Error('Network error');
+                
+                const data = await response.json();
+                renderSuggestions(data.suggestions || []);
+            } catch (err) {
+                console.error('❌ Ошибка получения подсказок:', err);
+                $dropdown.style.display = 'none';
+            }
+        }, 300);
+    });
+    
+    // 🔹 Рендер подсказок
+    function renderSuggestions(suggestions) {
+        $dropdown.innerHTML = '';
+        
+        if (suggestions.length === 0) {
+            $dropdown.style.display = 'none';
+            return;
+        }
+        
+        suggestions.forEach(item => {
+            const $item = document.createElement('div');
+            $item.className = 'suggestion-item';
+            $item.textContent = item.value;
+            $item.addEventListener('click', () => selectSuggestion(item));
+            $dropdown.appendChild($item);
+        });
+        
+        $dropdown.style.display = 'block';
+    }
+    
+    // 🔹 Выбор подсказки
+    function selectSuggestion(item) {
+        $input.value = item.value;
+        $lat.value = item.data.lat || '';
+        $lon.value = item.data.lon || '';
+        $dropdown.style.display = 'none';
+        
+        $status.textContent = '✅ Адрес верифицирован';
+        $status.className = 'mt-1 text-xs text-green-600';
+        $warning.classList.add('hidden');
+        
+        console.log('📍 Выбран:', item.value, item.data.lat, item.data.lon);
+    }
+    
+    // Закрытие dropdown при клике вне
+    document.addEventListener('click', (e) => {
+        if (!$container.contains(e.target)) {
+            $dropdown.style.display = 'none';
+        }
+    });
+    
+    // Предзаполнение если адрес уже есть
+    if ($input.value && "{{ user.latitude or '' }}") {
+        $lat.value = "{{ user.latitude }}";
+        $lon.value = "{{ user.longitude }}";
+        $status.textContent = '✅ Адрес верифицирован';
+        $status.className = 'mt-1 text-xs text-green-600';
+    }
+});
+</script>
 {% endblock %}

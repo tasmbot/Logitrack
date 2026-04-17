@@ -6,15 +6,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+import os
 
 from config import DB_CONFIG, SECRET_KEY, ROLE_NAMES
-from routes import auth, main, profile, operator, client
+from routes import auth, main, profile, operator, client, dadata
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Инициализация пула БД при старте
     app.state.db_pool = await asyncpg.create_pool(**DB_CONFIG, min_size=1, max_size=5)
+    app.state.dadata_token = os.getenv("DADATA_API_KEY", "")
     yield
     # Закрытие пула при остановке
     if app.state.db_pool:
@@ -40,3 +42,4 @@ app.include_router(main.router)
 app.include_router(profile.router)
 app.include_router(operator.router) 
 app.include_router(client.router) 
+app.include_router(dadata.router) 

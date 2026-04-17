@@ -6,3 +6,4 @@ itsdangerous==2.1.2
 asyncpg==0.29.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
+httpx>=0.25.0

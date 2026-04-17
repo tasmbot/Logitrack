@@ -304,11 +304,13 @@ async def order_detail_page(request: Request, order_id: int):
         order = await conn.fetchrow("""
             SELECT o.order_id, o.total_price, o.comments, o.created_at, o.updated_at,
                    CONCAT(u.first_name, ' ', u.last_name) as client_name, u.email as client_email, u.phone as client_phone,
-                   s.status_name, cl.address as client_address
+                   s.status_name, l.address as client_address
             FROM orders o
             JOIN clients cl ON o.client_id = cl.client_id
             JOIN users u ON cl.user_id = u.user_id
             JOIN statuses s ON o.status_id = s.status_id
+            JOIN deliveries d ON o.order_id = d.order_id
+            JOIN locations l ON d.location_id = l.location_id
             WHERE o.order_id = $1
         """, order_id)
         if not order: raise HTTPException(status_code=404, detail="Заказ не найден")
