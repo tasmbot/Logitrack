@@ -11,15 +11,56 @@
     <!-- Добавление товаров -->
     <div class="bg-white p-4 rounded shadow">
         <h2 class="text-xl font-bold mb-4">🛒 Товары</h2>
-        <label class="block text-sm font-medium">Товар</label>
-        <select id="item-select" class="w-full p-2 border rounded mb-2">
-            {% for item in items %}
-            <option value="{{ item.item_id }}" data-price="{{ item.price }}">{{ item.item_name }} ({{ item.price }} ₽)</option>
-            {% endfor %}
-        </select>
-        <label class="block text-sm font-medium">Количество</label>
-        <input type="number" id="qty-input" value="1" min="1" class="w-full p-2 border rounded mb-2">
-        <button onclick="addToCart()" class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700">Добавить в корзину</button>
+        
+        <!-- Выбор товара: ОДИН select со списком опций -->
+        <div class="mb-3">
+            <label for="item-select" class="block text-sm font-medium text-gray-700 mb-1">Товар</label>
+            <select id="item-select" class="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500">
+                {% if items %}
+                    <option value="" disabled selected>— Выберите товар —</option>
+                    {% for item in items %}
+                        {% if item.available_qty is defined and item.available_qty > 0 %}
+                        <option 
+                            value="{{ item.item_id }}" 
+                            data-price="{{ item.price }}"
+                            data-available="{{ item.available_qty }}"
+                        >
+                            {{ item.item_name }} — {{ item.price }} ₽ 
+                            
+                        </option>
+                        {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <option disabled>❌ Нет товаров в наличии в ближайшем магазине</option>
+                {% endif %}
+            </select>
+            <!-- Подсказка о наличии -->
+            <p id="stock-hint" class="text-xs text-gray-500 mt-1 min-h-[16px]"></p>
+        </div>
+
+        <!-- Количество: ОДНО поле ввода -->
+        <div class="mb-4">
+            <label for="qty-input" class="block text-sm font-medium text-gray-700 mb-1">Количество</label>
+            <input 
+                type="number" 
+                id="qty-input" 
+                value="1" 
+                min="1" 
+                max="999"
+                class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                {% if not items %}disabled{% endif %}
+            >
+        </div>
+
+        <!-- Кнопка добавления -->
+        <button 
+            onclick="addToCart()" 
+            id="add-to-cart-btn"
+            class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+            {% if not items %}disabled{% endif %}
+        >
+            ➕ Добавить в корзину
+        </button>
     </div>
 
     <!-- Корзина -->
@@ -40,61 +81,159 @@ let cart = [];
 const cartList = document.getElementById('cart-list');
 const totalEl = document.getElementById('cart-total');
 const submitBtn = document.getElementById('submit-btn');
+const itemSelect = document.getElementById('item-select');
+const qtyInput = document.getElementById('qty-input');
+const stockHint = document.getElementById('stock-hint');
+const addToCartBtn = document.getElementById('add-to-cart-btn');
 
-function addToCart() {
-    const sel = document.getElementById('item-select');
-    const id = parseInt(sel.value);
-    const name = sel.options[sel.selectedIndex].text.split(' (')[0];
-    const price = parseFloat(sel.options[sel.selectedIndex].dataset.price);
-    const qty = parseInt(document.getElementById('qty-input').value) || 1;
-
-    const existing = cart.find(i => i.id === id);
-    if (existing) existing.qty += qty;
-    else cart.push({id, name, price, qty});
-    renderCart();
+// 🔹 Функция обновления лимитов и подсказок при смене товара
+function updateQuantityLimits() {
+    if (!itemSelect || !qtyInput) return;
+    
+    const selectedOption = itemSelect.options[itemSelect.selectedIndex];
+    const available = parseInt(selectedOption.dataset.available) || 0;
+    
+    if (available > 0) {
+        qtyInput.disabled = false;
+        qtyInput.max = available;
+        qtyInput.value = Math.min(parseInt(qtyInput.value) || 1, available);
+        
+        // Визуальная подсказка
+        if (stockHint) {
+            if (available <= 3) {
+                stockHint.textContent = `⚠️ Осталось мало: ${available} шт.`;
+                stockHint.className = 'text-xs text-orange-600 mt-1 font-medium';
+            } else {
+                stockHint.textContent = `✅ В наличии: ${available} шт.`;
+                stockHint.className = 'text-xs text-green-600 mt-1';
+            }
+        }
+    } else {
+        qtyInput.disabled = true;
+        qtyInput.value = '';
+        if (stockHint) {
+            stockHint.textContent = '❌ Товар закончился';
+            stockHint.className = 'text-xs text-red-600 mt-1 font-bold';
+        }
+    }
 }
 
+// 🔹 Добавление в корзину
+function addToCart() {
+    if (!itemSelect.value) {
+        alert('⚠️ Пожалуйста, выберите товар из списка');
+        return;
+    }
+    
+    const selectedOption = itemSelect.options[itemSelect.selectedIndex];
+    const id = parseInt(itemSelect.value);
+    const name = selectedOption.text.split(' — ')[0]; // Берём имя до первого тире
+    const price = parseFloat(selectedOption.dataset.price);
+    const available = parseInt(selectedOption.dataset.available) || 0;
+    let qty = parseInt(qtyInput.value) || 1;
+    
+    // Финальная проверка количества
+    if (qty > available) {
+        alert(`❌ В наличии только ${available} шт.`);
+        return;
+    }
+    
+    // Проверка на дубликаты в корзине
+    const existing = cart.find(i => i.id === id);
+    if (existing) {
+        if (existing.qty + qty > available) {
+            alert(`❌ Нельзя добавить больше ${available} шт. всего (уже в корзине: ${existing.qty})`);
+            return;
+        }
+        existing.qty += qty;
+    } else {
+        cart.push({id, name, price, qty});
+    }
+    
+    renderCart();
+    
+    // Сброс количества, но не выбора товара (удобно для добавления разных товаров)
+    qtyInput.value = 1;
+}
+
+// 🔹 Удаление из корзины
 function removeFromCart(id) {
     cart = cart.filter(i => i.id !== id);
     renderCart();
 }
 
+// 🔹 Отрисовка корзины
 function renderCart() {
+    if (!cartList) return;
     cartList.innerHTML = '';
     let total = 0;
-    cart.forEach(item => {
-        const li = document.createElement('li');
-        li.className = 'flex justify-between items-center bg-gray-50 p-2 rounded';
-        li.innerHTML = `<span>${item.name} x${item.qty}</span>
-            <div class="flex items-center space-x-2">
-                <span class="font-medium">${(item.price * item.qty).toFixed(2)} ₽</span>
-                <button onclick="removeFromCart(${item.id})" class="text-red-500 hover:text-red-700 font-bold">×</button>
-            </div>`;
-        cartList.appendChild(li);
-        total += item.price * item.qty;
-    });
-    totalEl.textContent = total.toFixed(2) + ' ₽';
-    submitBtn.disabled = cart.length === 0;
+    
+    if (cart.length === 0) {
+        cartList.innerHTML = '<li class="text-gray-400 text-sm italic p-2">Корзина пуста</li>';
+    } else {
+        cart.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'flex justify-between items-center bg-gray-50 p-2 rounded border';
+            li.innerHTML = `
+                <div>
+                    <span class="font-medium">${item.name}</span>
+                    <span class="text-gray-500 text-sm"> × ${item.qty}</span>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span class="font-bold text-blue-600">${(item.price * item.qty).toFixed(2)} ₽</span>
+                    <button onclick="removeFromCart(${item.id})" class="text-red-500 hover:text-red-700 font-bold text-lg leading-none">×</button>
+                </div>
+            `;
+            cartList.appendChild(li);
+            total += item.price * item.qty;
+        });
+    }
+    
+    if (totalEl) totalEl.textContent = total.toFixed(2) + ' ₽';
+    if (submitBtn) submitBtn.disabled = cart.length === 0;
 }
 
+// 🔹 Инициализация при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    // Устанавливаем лимиты при загрузке страницы
+    if (itemSelect) {
+        updateQuantityLimits();
+        itemSelect.addEventListener('change', updateQuantityLimits);
+    }
+});
+
+// 🔹 Оформление заказа
 async function submitOrder() {
     if (cart.length === 0) return;
-    submitBtn.disabled = true; submitBtn.textContent = 'Оформление...';
+    
+    const originalBtnText = submitBtn.textContent;
+    submitBtn.disabled = true; 
+    submitBtn.textContent = 'Оформление...';
+    
     try {
         const res = await fetch('/client/orders', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({cart: cart.map(i => ({id: i.id, qty: i.qty})), comment: document.getElementById('comment-input').value})
+            body: JSON.stringify({
+                cart: cart.map(i => ({id: i.id, qty: i.qty})), 
+                comment: document.getElementById('comment-input').value
+            })
         });
         const data = await res.json();
+        
         if (data.status === 'ok') {
             alert(`✅ Заказ #${data.order_id} успешно создан!`);
             window.location.href = '/dashboard/client';
         } else {
-            alert('❌ Ошибка: ' + data.detail);
+            alert('❌ Ошибка: ' + (data.detail || 'Неизвестная ошибка'));
         }
-    } catch (e) { alert('❌ Ошибка сети'); }
-    finally { submitBtn.disabled = false; submitBtn.textContent = 'Оформить заказ'; }
+    } catch (e) { 
+        console.error(e);
+        alert('❌ Ошибка сети или сервера'); 
+    } finally { 
+        submitBtn.disabled = false; 
+        submitBtn.textContent = originalBtnText; 
+    }
 }
 </script>
 {% endblock %}

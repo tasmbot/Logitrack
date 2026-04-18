@@ -95,13 +95,75 @@ async def create_order_page(request: Request):
     client_id = await _resolve_client_id(request)
     
     async with pool.acquire() as conn:
-        items = await conn.fetch("SELECT item_id, item_name, price FROM items ORDER BY item_name")
-        profile = await conn.fetchrow("SELECT address FROM clients WHERE client_id = $1", client_id)
+        # 1. Адрес клиента
+        profile = await conn.fetchrow(
+            """SELECT c.address, l.location_id 
+            FROM clients c
+            JOIN locations l ON c.address = l.address
+            WHERE client_id = $1""", client_id
+        )
         has_address = bool(profile and profile["address"])
+        
+        # 2. Если адрес есть — находим ближайший магазин
+        available_items = []
+        if has_address and profile["location_id"]:
+            # Координаты клиента
+            client_loc = await conn.fetchrow(
+                "SELECT latitude, longitude FROM locations WHERE location_id = $1",
+                profile["location_id"]
+            )
+            
+            if client_loc and client_loc["latitude"] and client_loc["longitude"]:
+                # Все магазины
+                stores = await conn.fetch("""
+                    SELECT location_id, latitude, longitude 
+                    FROM locations 
+                    WHERE location_type_id = (
+                        SELECT location_type_id FROM location_types WHERE location_type = 'store'
+                    )
+                """)
+                
+                # Поиск ближайшего
+                nearest = None
+                min_dist = float("inf")
+                c_lat, c_lng = float(client_loc["latitude"]), float(client_loc["longitude"])
+                
+                for s in stores:
+                    if s["latitude"] and s["longitude"]:
+                        dist = math.hypot(float(s["latitude"]) - c_lat, float(s["longitude"]) - c_lng)
+                        if dist < min_dist:
+                            min_dist = dist
+                            nearest = s
+                
+                # 3. Если магазин найден — загружаем товары с остатками
+                if nearest:
+                    store_id = nearest["location_id"]
+                    items_with_stock = await conn.fetch("""
+                        SELECT 
+                            i.item_id,
+                            i.item_name,
+                            i.price,
+                            COALESCE(ss.quantity, 0) AS available_qty
+                        FROM items i
+                        LEFT JOIN store_stock ss ON i.item_id = ss.item_id AND ss.location_id = $1
+                        WHERE COALESCE(ss.quantity, 0) > 0  -- Показываем только товары в наличии
+                        ORDER BY i.item_name
+                    """, store_id)
+                    
+                    available_items = [dict(i) for i in items_with_stock]
+        else:
+            # Фолбэк: все товары (для пользователей без адреса)
+            all_items = await conn.fetch("SELECT item_id, item_name, price FROM items ORDER BY item_name")
+            available_items = [dict(i) for i in all_items]
 
     return request.app.state.templates.TemplateResponse(
         "create_order.html",
-        {"request": request, "items": [dict(i) for i in items], "has_address": has_address}
+        {
+            "request": request, 
+            "items": available_items,  # Теперь с available_qty
+            "has_address": has_address,
+            "nearest_store_found": bool(nearest) if has_address else False  # Для отображения инфо
+        }
     )
 
 @router.post("/orders")
@@ -113,6 +175,7 @@ async def submit_order(request: Request):
 
     data = await request.json()
     cart = data.get("cart", [])
+    
     comment = data.get("comment", "")
     if not cart:
         raise HTTPException(status_code=400, detail="Корзина пуста")
