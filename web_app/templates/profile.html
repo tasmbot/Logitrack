@@ -38,8 +38,9 @@
         <form action="/profile/update" method="post" class="space-y-4 pt-4 border-t">
             <div>
                 <label class="block text-sm font-medium text-gray-700">Телефон</label>
-                <input type="tel" name="phone" value="{{ user.phone }}" 
-                       class="mt-1 w-full p-2 border rounded" placeholder="+7...">
+                <input type="tel" id="phone-input" name="phone" value="{{ user.phone }}" 
+                    pattern="\+7-\(\d{3}\)-\d{3}-\d{2}-\d{2}"
+                    class="mt-1 w-full p-2 border rounded" placeholder="+7-(999)-999-99-99">
             </div>
             <!-- Адрес доставки (с виджетом DaData) -->
             <div class="mb-4">
@@ -223,6 +224,48 @@ document.addEventListener('DOMContentLoaded', () => {
         $status.textContent = '✅ Адрес верифицирован';
         $status.className = 'mt-1 text-xs text-green-600';
     }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    const phoneInput = document.getElementById('phone-input');
+    if (!phoneInput) return;
+
+    const formatRussianPhone = (value) => {
+        // 1. Оставляем только цифры
+        let digits = value.replace(/\D/g, '');
+        // 2. Нормализуем 8 → 7
+        if (digits.startsWith('8')) digits = '7' + digits.slice(1);
+        // 3. Если не начинается с 7 → добавляем
+        if (!digits.startsWith('7')) digits = '7' + digits;
+        // 4. Ограничиваем 11 символами (7 + 10 цифр)
+        digits = digits.slice(0, 11);
+        
+        if (digits.length === 0) return '';
+        
+        // 5. Собираем формат +7-(XXX)-XXX-XX-XX
+        let formatted = '+7';
+        if (digits.length > 1) formatted += '-(' + digits.slice(1, 4);
+        if (digits.length > 4) formatted += ')-' + digits.slice(4, 7);
+        if (digits.length > 7) formatted += '-' + digits.slice(7, 9);
+        if (digits.length > 9) formatted += '-' + digits.slice(9, 11);
+        return formatted;
+    };
+
+    // Форматирование при вводе
+    phoneInput.addEventListener('input', (e) => {
+        const oldVal = e.target.value;
+        const newVal = formatRussianPhone(oldVal);
+        e.target.value = newVal;
+        // Корректируем позицию курсора
+        const diff = newVal.length - oldVal.length;
+        const pos = e.target.selectionStart + diff;
+        e.target.setSelectionRange(pos, pos);
+    });
+
+    // Форматирование при потере фокуса (защита от вставки)
+    phoneInput.addEventListener('blur', () => {
+        phoneInput.value = formatRussianPhone(phoneInput.value);
+    });
 });
 </script>
 {% endblock %}

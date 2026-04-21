@@ -1,12 +1,16 @@
 # routes/profile.py
 from fastapi import APIRouter, Request, Form, HTTPException
 from fastapi.responses import RedirectResponse
+from datetime import datetime
+import re
+
 from core.db import get_pool
 from config import ROLE_NAMES
 
-from datetime import datetime
-
 router = APIRouter()
+
+# Валидация формата +7-(999)-999-99-99
+PHONE_VALIDATION_REGEX = re.compile(r"^\+7-\(\d{3}\)-\d{3}-\d{2}-\d{2}$")
 
 @router.get("/profile")
 async def profile_page(request: Request):
@@ -83,7 +87,21 @@ async def profile_update(
     try:
         async with pool.acquire() as conn:
             # 1. Обновляем телефон в users
+                        # 1. Обновляем телефон в users (с валидацией)
             if phone:
+                # Санитизация: приводим любой ввод к каноническому виду
+                clean = re.sub(r'\D', '', phone)
+                if clean.startswith('8'): clean = '7' + clean[1:]
+                if not clean.startswith('7'): clean = '7' + clean
+                clean = clean[:11] # Обрезаем лишнее
+
+                if len(clean) == 11 and clean.isdigit():
+                    # Форматируем обратно под шаблон БД
+                    phone = f"+7-({clean[1:4]})-{clean[4:7]}-{clean[7:9]}-{clean[9:11]}"
+                else:
+                    request.session.setdefault("_messages", []).append("error: Неверный формат телефона (требуется 11 цифр)")
+                    return RedirectResponse("/profile", status_code=303)
+
                 await conn.execute(
                     "UPDATE users SET phone = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2",
                     phone, user_id
