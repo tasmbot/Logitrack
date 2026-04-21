@@ -256,10 +256,6 @@ async def submit_order(request: Request):
                 "INSERT INTO order_items (order_id, item_id, ordered_quantity) VALUES ($1, $2, $3)",
                 order_id, item["id"], item["qty"]
             )
-            await conn.execute(
-                "UPDATE store_stock SET quantity = quantity - $1 WHERE location_id = $2 AND item_id = $3",
-                item["qty"], store_location_id, item["id"]
-            )
 
         # 5. Назначение доставки
         # courier = await conn.fetchrow("SELECT courier_id FROM couriers WHERE active = true ORDER BY RANDOM() LIMIT 1")
