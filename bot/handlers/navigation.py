@@ -49,180 +49,110 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Центральный роутер для callback-запросов (кнопок)."""
+    """Диспетчер callback-запросов: маршрутизирует по префиксу, убирает вложенные if/elif."""
     query = update.callback_query
     await query.answer()
-    
-    parts = query.data.split(":")
-    action = parts[0]
-    
-    # === Навигация по меню ===
-    if query.data == "menu:start":
-        await start_cmd(update, context)
-        return
-    
-    elif query.data == "menu:main":
-        if FlowManager.is_authenticated(context):
-            await query.edit_message_text(
-                "📂 *Главное меню*",
-                parse_mode="Markdown",
-                reply_markup=kb_main_menu()
-            )
-        else:
-            await query.edit_message_text(
-                "⚠️ Требуется авторизация.",
-                reply_markup=kb_auth_menu()
-            )
-        return
-    
-    # === Авторизация ===
-    elif action == "auth":
-        target = parts[1] if len(parts) > 1 else None
-        
-        if target == "start":
-            FlowManager.set_flow(context, "login_email")
-            await query.edit_message_text(
-                "🔑 Введите вашу *почту*:",
-                parse_mode="Markdown",
-                reply_markup=kb_back()
-            )
-        elif target == "reg":
-            FlowManager.set_flow(context, "reg_email")
-            await query.edit_message_text(
-                "📝 Регистрация. Введите *почту*:",
-                parse_mode="Markdown",
-                reply_markup=kb_back()
-            )
-        elif target == "logout":
-            FlowManager.logout(context)
-            await query.edit_message_text(
-                "👋 Вы вышли из системы.",
-                reply_markup=kb_auth_menu()
-            )
-        return
-    
-    # === Работа с БД ===
-    elif action == "db":
-        sub_action = parts[1] if len(parts) > 1 else None
-        
-        if sub_action == "read":
-            await query.edit_message_text(
-                "📖 Выберите таблицу для чтения:",
-                reply_markup=kb_tables("read")
-            )
-            return
-        
-        elif sub_action == "write":
-            await query.edit_message_text(
-                "📝 Выберите таблицу для записи:",
-                reply_markup=kb_tables("write")
-            )
-            return
-        
-        elif sub_action == "select" and len(parts) >= 4:
-            mode = parts[2]
-            table = parts[3]
-            
-            if table not in ALLOWED_TABLES:
-                await query.edit_message_text(
-                    "⚠️ Таблица недоступна.",
-                    reply_markup=kb_back()
-                )
-                return
-            
-            schema = TABLE_SCHEMA.get(table)
-            if not schema:
-                await query.edit_message_text(
-                    "⚠️ Таблица не сконфигурирована.",
-                    reply_markup=kb_back()
-                )
-                return
-            
-            pool = get_pool(context)
-            if not pool:
-                await query.edit_message_text(
-                    "❌ Нет подключения к БД.",
-                    reply_markup=kb_back()
-                )
-                return
-            
-            if mode == "read":
-                await db_read.handle_read_table(query, context, table, schema["read"])
-            elif mode == "write":
-                await db_write.prepare_write_form(query, context, table, schema["write"])
-            return
-    
-    # === Работа с заказами (только для курьеров) ===
-    elif action == "order":
-        # Проверка: только курьеры имеют доступ к заказам
-        if not FlowManager.is_courier(context):
-            await query.edit_message_text(
-                "⚠️ Раздел «Мои заказы» доступен только курьерам.",
-                reply_markup=kb_back()
-            )
-            return
-        
-        sub = parts[1] if len(parts) > 1 else None
-        
-        # 1. Показать список заказов
-        if sub == "menu" or query.data == "menu:orders":
-            await show_courier_orders(update, context)
-            return
-        
-        # 2. Выбор конкретного заказа: order:select:123
-        elif sub == "select" and len(parts) >= 3:
-            try:
-                delivery_id = int(parts[2])
-                await select_delivery(update, context, delivery_id)
-            except (ValueError, IndexError) as e:
-                logger.error(f"Ошибка парсинга delivery_id: {e}, parts={parts}")
-                await query.edit_message_text(
-                    "⚠️ Неверный формат заказа. Попробуйте выбрать снова.",
-                    reply_markup=kb_back()
-                )
-            return
-        
-        # 3. Начало отслеживания: order:start:123
-        elif sub == "start" and len(parts) >= 3:
-            try:
-                delivery_id = int(parts[2])
-                await start_tracking(update, context, delivery_id)
-            except (ValueError, IndexError) as e:
-                logger.error(f"Ошибка парсинга delivery_id: {e}, parts={parts}")
-                await query.edit_message_text(
-                    "⚠️ Не удалось начать отслеживание. Попробуйте снова.",
-                    reply_markup=kb_back()
-                )
-            return
-        
-        # Завершение заказа
-        elif sub == "complete" and len(parts) >= 3:
-            try:
-                delivery_id = int(parts[2])
-                await complete_order(update, context, delivery_id)
-            except (ValueError, IndexError) as e:
-                logger.error(f"Ошибка парсинга delivery_id для завершения: {e}")
-                await query.edit_message_text("⚠️ Не удалось завершить заказ.", reply_markup=kb_back())
-            return
-        
-        # 4. Остановка отслеживания
-        elif sub == "stop":
-            await stop_tracking(update, context)
-            return
-        
-        # 5. Fallback для неизвестных поддействий
-        await query.edit_message_text(
-            "⚠️ Действие с заказом недоступно.",
-            reply_markup=kb_back()
-        )
-        return
-    
-    # === Fallback для неизвестных кнопок ===
-    await query.edit_message_text(
-        "⚠️ Действие недоступно.",
-        reply_markup=kb_back()
-    )
+    data = query.data
 
+    # Прямые соответствия меню
+    if data == "menu:start":
+        return await start_cmd(update, context)
+    if data == "menu:main":
+        if FlowManager.is_authenticated(context):
+            await query.edit_message_text("📂 *Главное меню*", parse_mode="Markdown", reply_markup=kb_main_menu())
+        else:
+            await query.edit_message_text("⚠️ Требуется авторизация.", reply_markup=kb_auth_menu())
+        return
+
+    # Делегирование по модулям
+    if data.startswith("auth:"):
+        return await _route_auth(update, context, data)
+    if data.startswith("db:"):
+        return await _route_db(update, context, data)
+    if data.startswith("order:"):
+        return await _route_order(update, context, data)
+
+    # Fallback
+    await query.edit_message_text("⚠️ Действие недоступно.", reply_markup=kb_back())
+
+
+async def _route_auth(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    _, action = data.split(":", 1)
+    query = update.callback_query
+    
+    if action == "start":
+        FlowManager.set_flow(context, "login_email")
+        await query.edit_message_text("🔑 Введите вашу *почту*:", parse_mode="Markdown", reply_markup=kb_back())
+    elif action == "reg":
+        FlowManager.set_flow(context, "reg_email")
+        await query.edit_message_text("📝 Регистрация. Введите *почту*:", parse_mode="Markdown", reply_markup=kb_back())
+    elif action == "logout":
+        FlowManager.logout(context)
+        await query.edit_message_text("👋 Вы вышли из системы.", reply_markup=kb_auth_menu())
+    else:
+        await query.edit_message_text("⚠️ Неизвестное действие авторизации.", reply_markup=kb_back())
+
+
+async def _route_db(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    parts = data.split(":")
+    query = update.callback_query
+    if len(parts) < 2: 
+        return await query.edit_message_text("⚠️ Неверный формат.", reply_markup=kb_back())
+
+    sub = parts[1]
+    if sub == "read":
+        await query.edit_message_text("📖 Выберите таблицу для чтения:", reply_markup=kb_tables("read"))
+    elif sub == "write":
+        await query.edit_message_text("📝 Выберите таблицу для записи:", reply_markup=kb_tables("write"))
+    elif sub == "select" and len(parts) >= 4:
+        mode, table = parts[2], parts[3]
+        if table not in ALLOWED_TABLES:
+            return await query.edit_message_text("⚠️ Таблица недоступна.", reply_markup=kb_back())
+        schema = TABLE_SCHEMA.get(table)
+        if not schema:
+            return await query.edit_message_text("⚠️ Таблица не сконфигурирована.", reply_markup=kb_back())
+        pool = get_pool(context)
+        if not pool:
+            return await query.edit_message_text("❌ Нет подключения к БД.", reply_markup=kb_back())
+            
+        if mode == "read":
+            await db_read.handle_read_table(query, context, table, schema["read"])
+        elif mode == "write":
+            await db_write.prepare_write_form(query, context, table, schema["write"])
+    else:
+        await query.edit_message_text("⚠️ Действие с БД недоступно.", reply_markup=kb_back())
+
+
+async def _route_order(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    if not FlowManager.is_courier(context):
+        return await update.callback_query.edit_message_text("⚠️ Раздел доступен только курьерам.", reply_markup=kb_back())
+
+    parts = data.split(":")
+    sub = parts[1] if len(parts) > 1 else None
+    query = update.callback_query
+
+    if sub == "menu":
+        return await show_courier_orders(update, context)
+    if sub == "select" and len(parts) >= 3:
+        try:
+            return await select_delivery(update, context, int(parts[2]))
+        except ValueError:
+            return await query.edit_message_text("⚠️ Неверный ID заказа.", reply_markup=kb_back())
+    if sub == "start" and len(parts) >= 3:
+        try:
+            return await start_tracking(update, context, int(parts[2]))
+        except ValueError:
+            return await query.edit_message_text("⚠️ Ошибка старта.", reply_markup=kb_back())
+    if sub == "complete" and len(parts) >= 3:
+        try:
+            return await complete_order(update, context, int(parts[2]))
+        except ValueError:
+            return await query.edit_message_text("⚠️ Ошибка завершения.", reply_markup=kb_back())
+    if sub == "stop":
+        return await stop_tracking(update, context)
+
+    await query.edit_message_text("⚠️ Действие с заказом недоступно.", reply_markup=kb_back())
+    
 
 async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Центральный роутер для текстовых сообщений (конечный автомат)."""

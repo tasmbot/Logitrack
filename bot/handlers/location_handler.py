@@ -5,8 +5,7 @@ from datetime import datetime, timezone
 from telegram import Update
 from telegram.ext import ContextTypes
 from aiokafka.errors import KafkaError
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from core.context import FlowManager
 from config import KAFKA_COORD_TOPIC
 
@@ -17,49 +16,44 @@ async def handle_location_update(update: Update, context: ContextTypes.DEFAULT_T
     if not message or not message.location:
         return
 
-    logger.info(f"📍 Получены координаты: {message.location.latitude}, {message.location.longitude}")
-    logger.info(f"   tracking_active={FlowManager.is_tracking_active(context)}, location_shared={FlowManager.is_location_shared(context)}")
+    delivery_id = FlowManager.get_delivery(context)
+    is_tracking = FlowManager.is_tracking_active(context)
 
-    if FlowManager.is_tracking_active(context):
-        logger.info("📤 Отправка в Kafka (режим отслеживания)")
+    # 1. Трекинг активен → отправка в Kafka
+    if is_tracking and delivery_id:
         await _send_coords_to_kafka(update, context, message.location)
         return
 
-    if not FlowManager.is_location_shared(context):
-        logger.info("🔑 Первое получение геопозиции — ставим флаг и показываем кнопку")
-        FlowManager.set_location_shared(context, True)
-        
-        delivery_id = FlowManager.get_delivery(context)
-        if delivery_id:
-            keyboard = [[InlineKeyboardButton("🚀 Начать заказ", callback_data="start_tracking")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+    # 2. Трекинг не активен, но заказ выбран → предлагаем начать
+    if not is_tracking and delivery_id:
+        # Показываем кнопку только при НОВОМ сообщении (не edited_message), чтобы не спамить
+        if update.edited_message is None:
+            keyboard = [[InlineKeyboardButton("🚀 Начать заказ", callback_data=f"order:start:{delivery_id}")]]
             await message.reply_text(
-                f"✅ Геопозиция получена!\n"
-                f"Теперь вы можете приступить к заказу.",
-                reply_markup=reply_markup
+                "📍 Геопозиция получена. Для начала работы нажмите кнопку:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
-        else:
-            await message.reply_text("✅ Геопозиция получена. Сначала выберите заказ в меню.")
-    else:
-        logger.info("⏭ Геопозиция уже была получена ранее — игнорируем (ждём нажатия кнопки)")
+        return
 
+    # 3. Заказ не выбран
+    if update.edited_message is None:
+        await message.reply_text(
+            "⚠️ Сначала выберите заказ в меню «Мои заказы».",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📦 Мои заказы", callback_data="order:menu")]])
+        )
+        
 async def _send_coords_to_kafka(update: Update, context: ContextTypes.DEFAULT_TYPE, loc):
-    """Внутренняя функция отправки в Kafka (вызывается только при active=True)"""
+    """Отправка координат в Kafka."""
     delivery_id = FlowManager.get_delivery(context)
-    # courier_id = context.user_data.get("courier_id")  # или из FlowManager
     courier_id = FlowManager.get_courier_id(context)
     producer = context.bot_data.get("kafka_producer")
 
-    if courier_id is None:
-        # Вариант А: взять из сессии Telegram (если курьер логинился в боте)
-        courier_id = context.user_data.get("courier_id")
-        
-    if courier_id is None:
-        logger.warning("⚠️ courier_id отсутствует в контексте. Координата будет сохранена без привязки к курьеру.")
- 
-
     if not producer or not delivery_id:
         return
+    
+    # Если courier_id не в контексте, пробуем взять из сессии
+    if not courier_id:
+        courier_id = context.user_data.get("courier_id")
 
     payload = {
         "delivery_id": delivery_id,
@@ -76,5 +70,7 @@ async def _send_coords_to_kafka(update: Update, context: ContextTypes.DEFAULT_TY
             key=str(delivery_id).encode(),
             value=json.dumps(payload).encode()
         )
+        # Логируем тихо, чтобы не спамить в чат
+        logger.debug(f"📤 Kafka: delivery={delivery_id}")
     except KafkaError as e:
         logger.error(f"❌ Ошибка Kafka: {e}")
