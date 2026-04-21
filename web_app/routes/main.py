@@ -111,7 +111,7 @@ async def get_courier_orders(request: Request):
                 CONCAT(u.first_name, ' ', u.last_name) AS client_name,
                 u.phone AS client_phone,
                 l.address AS delivery_address,
-                COALESCE(o.total_weight, 0) AS total_weight,
+                CONCAT(COALESCE(o.total_weight, 0), ' кг') AS total_weight,
                 s.status_name,
                 to_char(o.created_at, 'DD-MM-YYYY HH24:MI') as created_at
             FROM deliveries d
@@ -121,6 +121,7 @@ async def get_courier_orders(request: Request):
             JOIN users u ON c.user_id = u.user_id
             LEFT JOIN locations l ON d.location_id = l.location_id
             WHERE d.courier_id = $1
+            AND (s.status_name in ('created', 'in_transit') OR o.created_at::date = CURRENT_DATE) -- отображаем либо активные, либо сегодняшние заказы
             ORDER BY o.created_at DESC
         """, courier_id)
         

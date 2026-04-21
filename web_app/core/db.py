@@ -1,6 +1,7 @@
 # core/db.py
 import logging
 import asyncpg
+from contextlib import asynccontextmanager
 from fastapi import Request
 
 logger = logging.getLogger(__name__)

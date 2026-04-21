@@ -47,7 +47,7 @@ async def get_orders(request: Request):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT o.order_id, CONCAT(u.first_name, ' ', u.last_name) as client_name, u.phone as client_phone,
-                   l.address as delivery_location, o.total_price, s.status_name, s.status_id,
+                   l.address as delivery_location, CONCAT('₽ ', o.total_price::numeric) as total_price, s.status_name, s.status_id,
                    to_char(o.created_at, 'DD-MM-YYYY HH24:MI') as created_at
             FROM orders o
             JOIN clients c ON o.client_id = c.client_id
@@ -382,17 +382,21 @@ async def reorder_route_points(
 
         # 🔒 Атомарное обновление без конфликтов UNIQUE(route_id, sequence_num)
         async with conn.transaction():
-            # 1. Временно сдвигаем все sequence_num, чтобы избежать дубликатов при перезаписи
-            await conn.execute(
-                "UPDATE route_points SET sequence_num = sequence_num + 10000 WHERE route_id = $1",
-                route_id
-            )
-            # 2. Присваиваем новые порядковые номера (1, 2, 3...) по location_id
+            
+            web_user_id = request.session.get("user_id")
+            if web_user_id:
+                # Устанавливаем переменную ТОЛЬКО для этой транзакции
+                await conn.execute("SET LOCAL myapp.user_id = $1", str(web_user_id))
+            
+            # Прямое обновление без промежуточных хаков
             for idx, loc_id in enumerate(new_order, start=1):
-                await conn.execute(
-                    "UPDATE route_points SET sequence_num = $1 WHERE route_id = $2 AND location_id = $3",
-                    idx, route_id, loc_id
-                )
+                await conn.execute("""
+                    UPDATE route_points 
+                    SET sequence_num = $1 
+                    WHERE route_id = $2 AND location_id = $3
+                """, idx, route_id, loc_id)
+                
+                
 
     return {"status": "ok", "message": "Порядок точек успешно обновлён"}
 
