@@ -35,7 +35,7 @@ async def handle_location_update(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup = InlineKeyboardMarkup(keyboard)
             await message.reply_text(
                 f"✅ Геопозиция получена!\n"
-                f"Теперь вы можете приступить к заказу #{delivery_id}.",
+                f"Теперь вы можете приступить к заказу.",
                 reply_markup=reply_markup
             )
         else:

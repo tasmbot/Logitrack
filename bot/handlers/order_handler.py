@@ -79,7 +79,8 @@ async def select_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE, de
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow("""
-                    SELECT o.order_id, s.status_name, l.address, o.total_price
+                    SELECT o.order_id, s.status_name, l.address, 
+                    CONCAT('₽ ', o.total_price::numeric) as total_price, CONCAT(COALESCE(o.total_weight, 0), ' кг') as total_weight
                     FROM deliveries d
                     JOIN orders o ON d.order_id = o.order_id
                     JOIN statuses s ON o.status_id = s.status_id
@@ -130,8 +131,39 @@ async def select_delivery_callback(update: Update, context: ContextTypes.DEFAULT
 
     FlowManager.set_delivery(context, delivery_id)
     
+    # Получаем детали для отображения
+    pool = get_pool(context)
+    delivery_info = None
+    
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    SELECT o.order_id, s.status_name, l.address, 
+                    CONCAT('₽ ', o.total_price::numeric) as total_price, CONCAT(COALESCE(o.total_weight, 0), ' кг') as total_weight
+                    FROM deliveries d
+                    JOIN orders o ON d.order_id = o.order_id
+                    JOIN statuses s ON o.status_id = s.status_id
+                    JOIN locations l ON d.location_id = l.location_id
+                    WHERE d.delivery_id = $1
+                """, delivery_id)
+                if row:
+                    delivery_info = dict(row)
+        except Exception as e:
+            logger.error(f"Ошибка загрузки деталей доставки: {e}")
+
+    # Формируем текст с информацией
+    info_text = f"📦 Заказ #{delivery_info['order_id'] if delivery_info else delivery_id}\n"
+    if delivery_info:
+        info_text += (
+            f"🏠 Адрес: {delivery_info['address']}\n"
+            f"💰 Сумма: {delivery_info['total_price']}\n"
+            f"🏋️‍♂️ Вес: {delivery_info['total_weight']}\n"
+            f"📊 Статус: {delivery_info['status_name']}\n\n"
+        )
+    
     await query.edit_message_text(
-        f"📦 Выбран заказ #{delivery_id}.\n\n"
+        f"{info_text}"
         "📍 Для начала работы включите трансляцию геопозиции:\n"
         "1. Нажмите 📎 (скрепку) в поле ввода\n"
         "2. Выберите «Геопозиция»\n"

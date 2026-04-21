@@ -86,7 +86,7 @@ async def handle_login_pass(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             FlowManager.clear_temp_data(context)
             
             await update.message.reply_text(
-                f"✅ *Вход выполнен!* Добро пожаловать, курьер #{courier_info['courier_id']}.",
+                f"✅ *Вход выполнен!* Добро пожаловать, {courier_info['courier_name']}.",
                 parse_mode="Markdown",
                 reply_markup=kb_main_menu()
             )

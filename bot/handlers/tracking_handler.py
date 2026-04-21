@@ -33,7 +33,7 @@ async def start_tracking_callback(update: Update, context: ContextTypes.DEFAULT_
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"📡 Отслеживание заказа #{delivery_id} началось!\n"
+        f"📡 Отслеживание заказа началось!\n"
         f"📍 Ваши координаты теперь автоматически передаются в систему.\n"
         f"Не выключайте трансляцию геопозиции до завершения доставки.",
         reply_markup=reply_markup

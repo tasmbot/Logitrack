@@ -78,7 +78,7 @@ async def get_courier_info(pool, user_id: int):
     """
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
-            SELECT u.role_id, c.courier_id, c.active
+            SELECT u.role_id, c.courier_id, CONCAT(u.first_name, ' ', u.last_name) as courier_name, c.active
             FROM users u
             LEFT JOIN couriers c ON u.user_id = c.user_id
             WHERE u.user_id = $1
@@ -90,6 +90,7 @@ async def get_courier_info(pool, user_id: int):
         return {
             "role_id": row["role_id"],
             "courier_id": row["courier_id"],
+            "courier_name": row["courier_name"],
             "is_active_courier": row["active"] and row["courier_id"] is not None
         }
 
