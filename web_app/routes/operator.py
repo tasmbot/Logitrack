@@ -333,6 +333,7 @@ async def order_detail_page(request: Request, order_id: int):
                 ORDER BY delivery_id, updated_at DESC
             )
             SELECT d.delivery_id, CONCAT(u.first_name, ' ', u.last_name) as courier_name,
+                u.phone as courier_phone,
                 l.latitude as delivery_lat, l.longitude as delivery_lng,
                 lc.latitude, lc.longitude, lc.updated_at as coords_updated_at
             FROM deliveries d

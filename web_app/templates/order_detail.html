@@ -38,8 +38,8 @@
         <h3 class="text-lg font-bold mb-4 border-b pb-2">🚚 Доставка</h3>
         {% if delivery %}
         <div class="space-y-3 text-sm">
-            <p><span class="font-medium text-gray-600">ID доставки:</span> #{{ delivery.delivery_id }}</p>
             <p><span class="font-medium text-gray-600">Курьер:</span> {{ delivery.courier_name or 'Не назначен' }}</p>
+            <p><span class="font-medium text-gray-600">Телефон курьера:</span> {{ delivery.courier_phone or 'Не указан' }}</p>
         </div>
 
         <!-- Контейнер карты с data-атрибутами (IDE-безопасно) -->
