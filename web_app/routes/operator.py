@@ -334,7 +334,7 @@ async def order_detail_page(request: Request, order_id: int):
                 ORDER BY delivery_id, updated_at DESC
             )
             SELECT d.delivery_id, CONCAT(u.first_name, ' ', u.last_name) as courier_name,
-                u.phone as courier_phone,
+                u.phone as courier_phone, v.type as vehicle_type, v.license_plate,
                 l.latitude as delivery_lat, l.longitude as delivery_lng,
                 lc.latitude, lc.longitude, lc.updated_at as coords_updated_at,
                 d.expected_delivery_datetime
@@ -343,11 +343,23 @@ async def order_detail_page(request: Request, order_id: int):
             LEFT JOIN users u ON co.user_id = u.user_id
             LEFT JOIN locations l ON d.location_id = l.location_id
             LEFT JOIN latest_coords lc ON d.delivery_id = lc.delivery_id
+            LEFT JOIN couriers_vehicles cv on cv.courier_id = co.courier_id
+            LEFT JOIN vehicles v on v.vehicle_id = cv.vehicle_id
             WHERE d.order_id = $1;
         """, order_id)
 
         # 4. Расчёт expected_delivery_datetime (если маршрут начат и время ещё не рассчитано)
         expected_delivery_dt = None
+        
+        vehicle_coefficient = { # коэффициенты для расчета приблизительного времени доставки в зависимости от типа транспорта курьера
+                    "car"           : [1.2, 'Автомобиль'],
+                    "scooter"       : [2.5, 'Скутер'],
+                    "bicycle"       : [3.0, 'Велосипед'],
+                    "motorcycle"    : [1.8, 'Мотоцикл'],
+                    "van"           : [1.5, 'Минивен'],
+                    "truck"         : [1.5, 'Грузовик']
+                }
+                
         if delivery and delivery.get("latitude") and delivery.get("longitude"):  # координаты курьера
             # Проверяем, что есть координаты точки доставки и время ещё не рассчитано
             if (delivery.get("delivery_lat") and delivery.get("delivery_lng") 
@@ -361,11 +373,11 @@ async def order_detail_page(request: Request, order_id: int):
                     lon_end=float(delivery["delivery_lng"]),
                     lat_end=float(delivery["delivery_lat"])
                 )
-                
+            
                 if route_data and route_data.get("duration_sec"):
                     # Рассчитываем ожидаемое время: время последних координат + длительность маршрута
                     logger.info(f"route_data['duration_sec']: {route_data["duration_sec"]}")
-                    expected_delivery_dt = delivery["coords_updated_at"] + timedelta(seconds=route_data["duration_sec"])
+                    expected_delivery_dt = delivery["coords_updated_at"] + timedelta(seconds=route_data["duration_sec"] * vehicle_coefficient.get(delivery['vehicle_type'])[0]) 
                     
                     # Сохраняем в БД (только если ещё не сохранено)
                     await conn.execute(
@@ -395,7 +407,7 @@ async def order_detail_page(request: Request, order_id: int):
                 
                 # Если ETA ещё не рассчитано — считаем и сохраняем
                 if not delivery.get("expected_delivery_datetime") and route_data.get("duration_sec"):
-                    expected_delivery_dt = delivery["coords_updated_at"] + timedelta(seconds=route_data["duration_sec"])
+                    expected_delivery_dt = delivery["coords_updated_at"] + timedelta(seconds=route_data["duration_sec"] * vehicle_coefficient.get(delivery['vehicle_type'])[0])
                     await conn.execute(
                         "UPDATE deliveries SET expected_delivery_datetime = $1 WHERE delivery_id = $2",
                         expected_delivery_dt, delivery["delivery_id"]
@@ -407,6 +419,7 @@ async def order_detail_page(request: Request, order_id: int):
                 "request": request,
                 "order": dict(order),
                 "items": [dict(i) for i in items],
+                "vehicle": f"{vehicle_coefficient.get(delivery['vehicle_type'])[1]}, {delivery.get('license_plate')}",
                 "delivery": {
                     **(dict(delivery) if delivery else {}),
                     "expected_delivery_datetime": expected_delivery_dt

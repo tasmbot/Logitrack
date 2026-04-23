@@ -50,7 +50,7 @@ async def get_route_geometry(lon_start: float, lat_start: float, lon_end: float,
                 segment = data["features"][0]["properties"]["segments"][0]
                 return {
                     "geometry": data["features"][0]["geometry"]["coordinates"],  # [[lon, lat], ...]
-                    "duration_sec": int(segment["duration"]) * 1.2  # время в секундах, умноженное на коэффициент (аналог небольших пробок)
+                    "duration_sec": int(segment["duration"])  # время в секундах, умноженное на коэффициент (аналог небольших пробок)
                 }
             return None
             

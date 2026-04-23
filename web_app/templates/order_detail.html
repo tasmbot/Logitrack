@@ -40,6 +40,7 @@
         <div class="space-y-3 text-sm">
             <p><span class="font-medium text-gray-600">Курьер:</span> {{ delivery.courier_name or 'Не назначен' }}</p>
             <p><span class="font-medium text-gray-600">Телефон курьера:</span> {{ delivery.courier_phone or 'Не указан' }}</p>
+            <p><span class="font-medium text-gray-600">Транспорт курьера:</span> {{ vehicle or 'Не указан' }}</p>
             <p>
                 <span class="font-medium text-gray-600">⏱️ Ориентировочная доставка:</span>
                 {% if delivery.expected_delivery_datetime %}
