@@ -9,11 +9,12 @@ from decimal import Decimal
 from aiokafka import AIOKafkaConsumer
 from pydantic import BaseModel, ValidationError
 
-from config import KAFKA_BOOTSTRAP, KAFKA_TOPIC
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
+
+KAFKA_BOOTSTRAP = "127.0.0.1:9092"
+KAFKA_TOPIC =  "courier.coordinates"
 GROUP_ID = "coordinates-db-writer"
 DB_DSN = "postgresql://postgres:admin@localhost:5432/logitrack"
 BATCH_SIZE = 50

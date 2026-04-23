@@ -40,14 +40,27 @@
         <div class="space-y-3 text-sm">
             <p><span class="font-medium text-gray-600">Курьер:</span> {{ delivery.courier_name or 'Не назначен' }}</p>
             <p><span class="font-medium text-gray-600">Телефон курьера:</span> {{ delivery.courier_phone or 'Не указан' }}</p>
+            <p>
+                <span class="font-medium text-gray-600">⏱️ Ориентировочная доставка:</span>
+                {% if delivery.expected_delivery_datetime %}
+                    <span class="text-green-600 font-semibold">
+                        {{ delivery.expected_delivery_datetime.strftime('%H:%M') }}
+                    </span>
+                {% elif delivery.latitude and delivery.longitude %}
+                    <span class="text-orange-500">🔄 Расчёт...</span>
+                {% else %}
+                    <span class="text-gray-400">—</span>
+                {% endif %}
+            </p>
         </div>
 
-        <!-- Контейнер карты с data-атрибутами (IDE-безопасно) -->
+        <!-- Контейнер карты с data-атрибутами -->
         <div id="courier-map" class="w-full h-64 rounded mt-4 border z-0"
-             data-courier-lat="{{ delivery.latitude or '' }}"
-             data-courier-lng="{{ delivery.longitude or '' }}"
-             data-delivery-lat="{{ delivery.delivery_lat or '' }}"
-             data-delivery-lng="{{ delivery.delivery_lng or '' }}">
+            data-courier-lat="{{ delivery.latitude or '' }}"
+            data-courier-lng="{{ delivery.longitude or '' }}"
+            data-delivery-lat="{{ delivery.delivery_lat or '' }}"
+            data-delivery-lng="{{ delivery.delivery_lng or '' }}"
+            data-route-geometry="{{ route_geometry | tojson if route_geometry else '' }}">
         </div>
         {% if delivery.coords_updated_at %}
             <p class="text-xs text-gray-400 mt-1">📍 Обновление координат: {{ delivery.coords_updated_at.strftime('%H:%M:%S') }}</p>
@@ -94,26 +107,31 @@
 document.addEventListener('DOMContentLoaded', function() {
     const mapEl = document.getElementById('courier-map');
     if (!mapEl) return;
-
-    // Читаем координаты из data-атрибутов (безопасно для IDE)
+    
+    // Читаем координаты
     const cLat = parseFloat(mapEl.dataset.courierLat) || null;
     const cLng = parseFloat(mapEl.dataset.courierLng) || null;
     const dLat = parseFloat(mapEl.dataset.deliveryLat) || null;
     const dLng = parseFloat(mapEl.dataset.deliveryLng) || null;
-
+    
+    // 🔹 Читаем геометрию маршрута из data-атрибута (передаётся из бэкенда)
+    const routeGeometryStr = mapEl.dataset.routeGeometry || null;
+    const routeGeometry = routeGeometryStr ? JSON.parse(routeGeometryStr) : null;
+    
     const points = [];
     if (cLat && cLng) points.push([cLat, cLng]);
     if (dLat && dLng) points.push([dLat, dLng]);
-    if (points.length === 0) return; // Нет точек для отображения
-
+    
+    if (points.length === 0) return;
+    
     // Инициализация карты
-    const map = L.map('courier-map', { zoomControl: false }).setView(points[0], 14);
+    const map = L.map('courier-map', { zoomControl: false }).setView(points[0], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap', maxZoom: 19
     }).addTo(map);
     L.control.zoom({ position: 'topright' }).addTo(map);
-
-    // Кастомные маркеры (чистый CSS, без внешних картинок)
+    
+    // Маркеры
     const courierIcon = L.divIcon({
         className: '',
         html: '<div style="background:#3B82F6;width:16px;height:16px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3)"></div>',
@@ -124,24 +142,36 @@ document.addEventListener('DOMContentLoaded', function() {
         html: '<div style="background:#EF4444;width:16px;height:16px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3)"></div>',
         iconSize: [16, 16], iconAnchor: [8, 8]
     });
-
-    // Добавляем маркеры
+    
     if (cLat && cLng) {
         L.marker([cLat, cLng], { icon: courierIcon }).addTo(map).bindPopup('<b>📍 Курьер</b>');
     }
     if (dLat && dLng) {
         L.marker([dLat, dLng], { icon: deliveryIcon }).addTo(map).bindPopup('<b>🏁 Точка доставки</b>');
     }
-
-    // Пунктирная линия маршрута
-    if (cLat && cLng && dLat && dLng) {
-        L.polyline([[cLat, cLng], [dLat, dLng]], {
-            color: '#6B7280', weight: 3, dashArray: '5, 10'
+    
+    // 🔹 ОТРИСОВКА МАРШРУТА
+    if (routeGeometry && routeGeometry.length > 0) {
+        // ORS возвращает [lon, lat], Leaflet ждёт [lat, lon]
+        const latlngs = routeGeometry.map(coord => [coord[1], coord[0]]);
+        
+        L.polyline(latlngs, {
+            color: '#3B82F6',      // Синий цвет
+            weight: 5,             // Толще простой линии
+            opacity: 0.8,
+            lineCap: 'round',
+            dashArray: null        // Сплошная линия (не пунктир)
         }).addTo(map);
+        
+        // Автомасштабирование по маршруту
+        map.fitBounds(latlngs, { padding: [30, 30] });
+    } else if (cLat && cLng && dLat && dLng) {
+        // Фолбэк: простая линия, если ORS не сработал
+        L.polyline([[cLat, cLng], [dLat, dLng]], {
+            color: '#6B7280', weight: 3, dashArray: '5, 10', opacity: 0.6
+        }).addTo(map);
+        map.fitBounds(points, { padding: [20, 20] });
     }
-
-    // Автоматический зум, чтобы влезли все точки
-    map.fitBounds(points, { padding: [20, 20] });
 });
 </script>
 {% endblock %}

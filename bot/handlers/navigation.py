@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from core.context import FlowManager
 from core.db import get_pool
-from handlers import auth, db_read, db_write
+from handlers import auth
 from handlers.order_handler import (
     show_courier_orders,
     select_delivery,
@@ -13,6 +13,7 @@ from handlers.order_handler import (
     stop_tracking,
     complete_order
 )
+from handlers.tracking_handler import start_tracking_callback
 from utils.keyboards import (
     kb_back, kb_auth_menu, kb_main_menu, kb_tables, kb_auth_fail
 )
@@ -115,10 +116,6 @@ async def _route_db(update: Update, context: ContextTypes.DEFAULT_TYPE, data: st
         if not pool:
             return await query.edit_message_text("❌ Нет подключения к БД.", reply_markup=kb_back())
             
-        if mode == "read":
-            await db_read.handle_read_table(query, context, table, schema["read"])
-        elif mode == "write":
-            await db_write.prepare_write_form(query, context, table, schema["write"])
     else:
         await query.edit_message_text("⚠️ Действие с БД недоступно.", reply_markup=kb_back())
 
@@ -140,7 +137,7 @@ async def _route_order(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
             return await query.edit_message_text("⚠️ Неверный ID заказа.", reply_markup=kb_back())
     if sub == "start" and len(parts) >= 3:
         try:
-            return await start_tracking(update, context, int(parts[2]))
+            return await start_tracking_callback(update, context)
         except ValueError:
             return await query.edit_message_text("⚠️ Ошибка старта.", reply_markup=kb_back())
     if sub == "complete" and len(parts) >= 3:
@@ -182,10 +179,6 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if flow == "reg_pass":
         return await auth.handle_reg_pass(update, context, text)
-    
-    # === Запись в БД: ввод данных ===
-    if flow == "write_data":
-        return await db_write.handle_write_data(update, context, text)
     
     # === Fallback: эхо-режим ===
     await update.message.reply_text(text)

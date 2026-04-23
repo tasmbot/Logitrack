@@ -8,6 +8,7 @@ import json
 import csv
 import io
 import logging
+from datetime import timedelta
 
 from core.db import get_pool
 
@@ -335,7 +336,8 @@ async def order_detail_page(request: Request, order_id: int):
             SELECT d.delivery_id, CONCAT(u.first_name, ' ', u.last_name) as courier_name,
                 u.phone as courier_phone,
                 l.latitude as delivery_lat, l.longitude as delivery_lng,
-                lc.latitude, lc.longitude, lc.updated_at as coords_updated_at
+                lc.latitude, lc.longitude, lc.updated_at as coords_updated_at,
+                d.expected_delivery_datetime
             FROM deliveries d
             LEFT JOIN couriers co ON d.courier_id = co.courier_id
             LEFT JOIN users u ON co.user_id = u.user_id
@@ -344,15 +346,74 @@ async def order_detail_page(request: Request, order_id: int):
             WHERE d.order_id = $1;
         """, order_id)
 
-    return request.app.state.templates.TemplateResponse(
-        "order_detail.html",
-        {
-            "request": request,
-            "order": dict(order),
-            "items": [dict(i) for i in items],
-            "delivery": dict(delivery) if delivery else None
-        }
-    )
+        # 4. Расчёт expected_delivery_datetime (если маршрут начат и время ещё не рассчитано)
+        expected_delivery_dt = None
+        if delivery and delivery.get("latitude") and delivery.get("longitude"):  # координаты курьера
+            # Проверяем, что есть координаты точки доставки и время ещё не рассчитано
+            if (delivery.get("delivery_lat") and delivery.get("delivery_lng") 
+                and delivery.get("coords_updated_at") 
+                and not delivery.get("expected_delivery_datetime")):
+                
+                from core.routing import get_route_geometry
+                route_data = await get_route_geometry(
+                    lon_start=float(delivery["longitude"]),
+                    lat_start=float(delivery["latitude"]),
+                    lon_end=float(delivery["delivery_lng"]),
+                    lat_end=float(delivery["delivery_lat"])
+                )
+                
+                if route_data and route_data.get("duration_sec"):
+                    # Рассчитываем ожидаемое время: время последних координат + длительность маршрута
+                    logger.info(f"route_data['duration_sec']: {route_data["duration_sec"]}")
+                    expected_delivery_dt = delivery["coords_updated_at"] + timedelta(seconds=route_data["duration_sec"])
+                    
+                    # Сохраняем в БД (только если ещё не сохранено)
+                    await conn.execute(
+                        "UPDATE deliveries SET expected_delivery_datetime = $1 WHERE delivery_id = $2",
+                        expected_delivery_dt, delivery["delivery_id"]
+                    )
+            else:
+                # Если время уже рассчитано — просто читаем из БД
+                expected_delivery_dt = delivery.get("expected_delivery_datetime")
+                
+        # 5. Получение геометрии маршрута для отображения на карте
+        route_geometry = None
+        if delivery and delivery.get("latitude") and delivery.get("longitude") and \
+           delivery.get("delivery_lat") and delivery.get("delivery_lng"):
+            
+            from core.routing import get_route_geometry
+            route_data = await get_route_geometry(
+                lon_start=float(delivery["longitude"]),
+                lat_start=float(delivery["latitude"]),
+                lon_end=float(delivery["delivery_lng"]),
+                lat_end=float(delivery["delivery_lat"])
+            )
+            
+            if route_data:
+                # Извлекаем геометрию (если не извлекли ранее для ETA)
+                route_geometry = route_data.get("geometry")
+                
+                # Если ETA ещё не рассчитано — считаем и сохраняем
+                if not delivery.get("expected_delivery_datetime") and route_data.get("duration_sec"):
+                    expected_delivery_dt = delivery["coords_updated_at"] + timedelta(seconds=route_data["duration_sec"])
+                    await conn.execute(
+                        "UPDATE deliveries SET expected_delivery_datetime = $1 WHERE delivery_id = $2",
+                        expected_delivery_dt, delivery["delivery_id"]
+                    )
+
+        return request.app.state.templates.TemplateResponse(
+            "order_detail.html",
+            {
+                "request": request,
+                "order": dict(order),
+                "items": [dict(i) for i in items],
+                "delivery": {
+                    **(dict(delivery) if delivery else {}),
+                    "expected_delivery_datetime": expected_delivery_dt
+                },
+                "route_geometry": route_geometry
+            }
+        )
     
 @router.patch("/routes/{route_id}/reorder")
 async def reorder_route_points(

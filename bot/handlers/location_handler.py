@@ -26,6 +26,7 @@ async def handle_location_update(update: Update, context: ContextTypes.DEFAULT_T
 
     # 2. Трекинг не активен, но заказ выбран → предлагаем начать
     if not is_tracking and delivery_id:
+        FlowManager.set_location_shared(context, True)
         # Показываем кнопку только при НОВОМ сообщении (не edited_message), чтобы не спамить
         if update.edited_message is None:
             keyboard = [[InlineKeyboardButton("🚀 Начать заказ", callback_data=f"order:start:{delivery_id}")]]
@@ -43,21 +44,20 @@ async def handle_location_update(update: Update, context: ContextTypes.DEFAULT_T
         )
         
 async def _send_coords_to_kafka(update: Update, context: ContextTypes.DEFAULT_TYPE, loc):
-    """Отправка координат в Kafka."""
     delivery_id = FlowManager.get_delivery(context)
     courier_id = FlowManager.get_courier_id(context)
     producer = context.bot_data.get("kafka_producer")
 
-    if not producer or not delivery_id:
+    if not producer:
+        logger.warning("⚠️ Kafka Producer не инициализирован. Проверьте запуск брокера и логи setup_services.")
         return
-    
-    # Если courier_id не в контексте, пробуем взять из сессии
-    if not courier_id:
-        courier_id = context.user_data.get("courier_id")
+    if not delivery_id:
+        logger.warning("⚠️ delivery_id отсутствует в контексте. Отмена отправки.")
+        return
 
     payload = {
         "delivery_id": delivery_id,
-        "courier_id": courier_id,
+        "courier_id": courier_id or 0,
         "lat": loc.latitude,
         "lng": loc.longitude,
         "accuracy": loc.horizontal_accuracy or 0.0,
@@ -70,7 +70,6 @@ async def _send_coords_to_kafka(update: Update, context: ContextTypes.DEFAULT_TY
             key=str(delivery_id).encode(),
             value=json.dumps(payload).encode()
         )
-        # Логируем тихо, чтобы не спамить в чат
-        logger.debug(f"📤 Kafka: delivery={delivery_id}")
+        logger.info(f"📤 Kafka: доставка #{delivery_id} успешно отправлена")
     except KafkaError as e:
-        logger.error(f"❌ Ошибка Kafka: {e}")
+        logger.error(f"❌ Ошибка отправки в Kafka: {e}")

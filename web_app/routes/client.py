@@ -104,8 +104,11 @@ async def create_order_page(request: Request):
         )
         has_address = bool(profile and profile["address"])
         
-        # 2. Если адрес есть — находим ближайший магазин
+        # 🔹 Инициализируем переменные ДО условных блоков
+        nearest = None
         available_items = []
+        
+        # 2. Если адрес есть — находим ближайший магазин
         if has_address and profile["location_id"]:
             # Координаты клиента
             client_loc = await conn.fetchrow(
@@ -124,7 +127,6 @@ async def create_order_page(request: Request):
                 """)
                 
                 # Поиск ближайшего
-                nearest = None
                 min_dist = float("inf")
                 c_lat, c_lng = float(client_loc["latitude"]), float(client_loc["longitude"])
                 
@@ -146,7 +148,7 @@ async def create_order_page(request: Request):
                             COALESCE(ss.quantity, 0) AS available_qty
                         FROM items i
                         LEFT JOIN store_stock ss ON i.item_id = ss.item_id AND ss.location_id = $1
-                        WHERE COALESCE(ss.quantity, 0) > 0  -- Показываем только товары в наличии
+                        WHERE COALESCE(ss.quantity, 0) > 0
                         ORDER BY i.item_name
                     """, store_id)
                     
@@ -160,9 +162,9 @@ async def create_order_page(request: Request):
         "create_order.html",
         {
             "request": request, 
-            "items": available_items,  # Теперь с available_qty
+            "items": available_items,
             "has_address": has_address,
-            "nearest_store_found": bool(nearest) if has_address else False  # Для отображения инфо
+            "nearest_store_found": bool(nearest) if has_address else False 
         }
     )
 
