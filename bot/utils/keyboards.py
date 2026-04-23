@@ -20,20 +20,11 @@ def kb_auth_menu() -> InlineKeyboardMarkup:
 
 def kb_main_menu() -> InlineKeyboardMarkup:
     """Главное меню — адаптируется под роль пользователя."""
-    # Для курьера показываем "Мои заказы"
-    courier_btn = [InlineKeyboardButton("📦 Мои заказы", callback_data="order:menu")]
-    
-    # Для других ролей — общие функции
-    # common_btns = [
-    #     [InlineKeyboardButton("📊 Прочитать таблицу", callback_data="db:read")],
-    #     [InlineKeyboardButton("📝 Записать в таблицу", callback_data="db:write")],
-    # ]
-    
-    logout_btn = [InlineKeyboardButton("🚪 Выйти", callback_data="auth:logout")]
-    
-    # Для простоты покажем кнопку всем, а в handler'е сделаем проверку
-    # keyboard = [courier_btn] + common_btns + [logout_btn]
-    keyboard = [courier_btn] + [logout_btn]
+    keyboard = [
+        [InlineKeyboardButton("📦 Мои заказы", callback_data="order:menu")],
+        [InlineKeyboardButton("🗺 Мой маршрут", callback_data="route:show")],
+        [InlineKeyboardButton("🚪 Выйти", callback_data="auth:logout")]
+    ]
     return InlineKeyboardMarkup(keyboard)
 
 

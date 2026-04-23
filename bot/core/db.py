@@ -247,3 +247,45 @@ async def complete_order_transaction(pool, delivery_id: int, courier_id: int) ->
                 """, status_id, delivery["order_id"])
 
             return dict(delivery)
+        
+async def get_courier_current_route(pool, courier_id: int) -> tuple[Optional[dict], list[dict]]:
+    """
+    Получение текущего активного маршрута курьера и его точек.
+    
+    Returns:
+        tuple: (delivery_info или None, list of route_points)
+    """
+    async with pool.acquire() as conn:
+        # 1. Находим активную доставку с маршрутом
+        delivery = await conn.fetchrow("""
+            SELECT d.delivery_id, d.route_id, o.order_id
+            FROM deliveries d
+            JOIN orders o ON d.order_id = o.order_id
+            WHERE d.courier_id = $1 
+              AND d.actual_delivery_datetime IS NULL
+            ORDER BY d.delivery_id DESC 
+            LIMIT 1
+        """, courier_id)
+        
+        if not delivery:
+            return None, []
+        
+        # 2. Получаем точки маршрута в правильном порядке
+        points = await conn.fetch("""
+            SELECT 
+                rp.sequence_num,
+                l.location_id,
+                l.address,
+                l.latitude::float AS latitude, 
+                l.longitude::float AS longitude,
+                lt.location_type,
+                rp.expected_arrival_time, 
+                rp.actual_arrival_time
+            FROM route_points rp
+            JOIN locations l ON rp.location_id = l.location_id
+            JOIN location_types lt ON l.location_type_id = lt.location_type_id
+            WHERE rp.route_id = $1
+            ORDER BY rp.sequence_num ASC
+        """, delivery["route_id"])
+        
+        return dict(delivery), [dict(p) for p in points]

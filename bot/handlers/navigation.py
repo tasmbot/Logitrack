@@ -72,6 +72,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await _route_db(update, context, data)
     if data.startswith("order:"):
         return await _route_order(update, context, data)
+    if data.startswith("route:"):
+        return await _route_my_route(update, context, data)
 
     # Fallback
     await query.edit_message_text("⚠️ Действие недоступно.", reply_markup=kb_back())
@@ -150,6 +152,26 @@ async def _route_order(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
 
     await query.edit_message_text("⚠️ Действие с заказом недоступно.", reply_markup=kb_back())
     
+async def _route_my_route(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
+    """Роутер для раздела «Мой маршрут»."""
+    if not FlowManager.is_courier(context):
+        return await update.callback_query.edit_message_text(
+            "⚠️ Раздел доступен только курьерам.", 
+            reply_markup=kb_back()
+        )
+    
+    parts = data.split(":")
+    sub = parts[1] if len(parts) > 1 else None
+    query = update.callback_query
+    
+    if sub == "show":
+        from handlers.route_handler import show_courier_route
+        return await show_courier_route(update, context)
+    
+    await query.edit_message_text(
+        "⚠️ Действие с маршрутом недоступно.", 
+        reply_markup=kb_back()
+    )
 
 async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Центральный роутер для текстовых сообщений (конечный автомат)."""
