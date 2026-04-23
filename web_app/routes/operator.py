@@ -231,6 +231,18 @@ async def operator_courier_route_page(request: Request, courier_id: int):
 
     route_id = delivery["route_id"] if delivery else None
 
+    # Получение геометрии реального маршрута от ORS
+    route_geometry = None
+    if points and len(points) >= 2:
+        # Собираем координаты в порядке sequence_num: формат ORS = [longitude, latitude]
+        coords = [(float(p["longitude"]), float(p["latitude"])) for p in points 
+                if p["latitude"] and p["longitude"]]
+        
+        if len(coords) >= 2:
+            from core.routing import get_route_geometry_from_coords
+            route_geometry = await get_route_geometry_from_coords(coords)
+            logger.info(f"🗺️ ORS запрос: {len(coords)} точек → геометрия: {'✅' if route_geometry else '❌'}")
+
     # сериализуем datetime/Decimal перед передачей в шаблон
     return request.app.state.templates.TemplateResponse(
         "operator_courier_view.html",
@@ -240,7 +252,8 @@ async def operator_courier_route_page(request: Request, courier_id: int):
             "courier_id": courier_id,
             "route_id": route_id,
             "orders": _serialize_for_json([dict(o) for o in orders]),
-            "points": _serialize_for_json([dict(p) for p in points])
+            "points": _serialize_for_json([dict(p) for p in points]),
+            "route_geometry": route_geometry
         }
     )
 
@@ -457,12 +470,7 @@ async def reorder_route_points(
 
         # 🔒 Атомарное обновление без конфликтов UNIQUE(route_id, sequence_num)
         async with conn.transaction():
-            
-            web_user_id = request.session.get("user_id")
-            if web_user_id:
-                # Устанавливаем переменную ТОЛЬКО для этой транзакции
-                await conn.execute("SET LOCAL myapp.user_id = $1", str(web_user_id))
-            
+            await conn.execute("SET CONSTRAINTS route_points_pkey DEFERRED")
             # Прямое обновление без промежуточных хаков
             for idx, loc_id in enumerate(new_order, start=1):
                 await conn.execute("""

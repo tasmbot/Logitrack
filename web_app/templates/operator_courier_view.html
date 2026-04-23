@@ -24,7 +24,11 @@
 <!-- Карта маршрута -->
 <div class="bg-white p-4 rounded shadow mb-6">
     <h3 class="font-bold mb-3 text-lg">🗺️ Карта маршрута</h3>
-    <div id="courier-map" style="height: 450px; width: 100%;" class="rounded border z-0 relative"></div>
+    <div id="courier-map" 
+         style="height: 450px; width: 100%;" 
+         class="rounded border z-0 relative"
+         data-route-geometry="{{ route_geometry | tojson if route_geometry else '' }}">
+    </div>
     <p class="text-xs text-gray-400 mt-2">📍 Точки маршрута отображаются в порядке посещения</p>
 </div>
 
@@ -57,7 +61,6 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- 🟢 БЕЗОПАСНЫЙ ПЕРЕНОС ДАННЫХ (IDE не ругается, так как тип JSON) -->
 <script id="server-data" type="application/json">
     {{ {"orders": orders, "points": points} | tojson }}
 </script>
@@ -118,11 +121,32 @@ document.addEventListener('DOMContentLoaded', () => {
             .addTo(map);
     });
 
-    if (latlngs.length > 1) {
-        L.polyline(latlngs, { color: '#3B82F6', weight: 4, opacity: 0.8, dashArray: '6, 8' }).addTo(map);
+    // ОТРИСОВКА РЕАЛЬНОГО МАРШРУТА ОТ ORS
+    const routeGeometryStr = mapEl.dataset.routeGeometry || null;
+    const routeGeometry = routeGeometryStr ? JSON.parse(routeGeometryStr) : null;
+    
+    if (routeGeometry && routeGeometry.length > 0) {
+        // ORS возвращает [lon, lat], Leaflet ждёт [lat, lon]
+        const routeLatlngs = routeGeometry.map(coord => [coord[1], coord[0]]);
+        
+        L.polyline(routeLatlngs, {
+            color: '#3B82F6',      // Синий цвет
+            weight: 5,             // Чуть толще пунктира
+            opacity: 0.9,
+            lineCap: 'round',
+            dashArray: null        // Сплошная линия (реальный маршрут)
+        }).addTo(map);
+        
+        // Автомасштабирование по реальному маршруту
+        map.fitBounds(routeLatlngs, { padding: [30, 30] });
+    } else if (latlngs.length > 1) {
+        // Фолбэк: пунктирная прямая, если ORS не сработал
+        L.polyline(latlngs, { 
+            color: '#6B7280', weight: 3, opacity: 0.6, dashArray: '5, 10' 
+        }).addTo(map);
+        map.fitBounds(latlngs, { padding: [30, 30] });
     }
 
-    map.fitBounds(latlngs, { padding: [30, 30] });
     setTimeout(() => map.invalidateSize({ animate: false, pan: false }), 150);
 });
 </script>

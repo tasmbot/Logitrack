@@ -49,15 +49,15 @@ async def profile_page(request: Request):
             "request": request,
             "page_title": "Обо мне",
             "user": {
-                "first_name": row["first_name"],
-                "last_name": row["last_name"],
-                "email": row["email"],
-                "phone": row["phone"] or "",
-                "role_id": row["role_id"],
-                "role_name": ROLE_NAMES.get(row["role_id"], "Неизвестная роль"),
-                "address": row["address"] or "",
-                "date_of_birth": dob_str,
-                "sex": row["sex"] or "male"
+                "first_name"    : row["first_name"],
+                "last_name"     : row["last_name"],
+                "email"         : row["email"],
+                "phone"         : row["phone"] or "",
+                "role_id"       : row["role_id"],
+                "role_name"     : ROLE_NAMES.get(row["role_id"], "Неизвестная роль"),
+                "address"       : row["address"] or "",
+                "date_of_birth" : dob_str,
+                "sex"           : row["sex"] or "male"
             }
         }
     )
@@ -87,9 +87,7 @@ async def profile_update(
     try:
         async with pool.acquire() as conn:
             # 1. Обновляем телефон в users
-                        # 1. Обновляем телефон в users (с валидацией)
             if phone:
-                # Санитизация: приводим любой ввод к каноническому виду
                 clean = re.sub(r'\D', '', phone)
                 if clean.startswith('8'): clean = '7' + clean[1:]
                 if not clean.startswith('7'): clean = '7' + clean

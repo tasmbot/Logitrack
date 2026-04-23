@@ -3,14 +3,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "fallback-dev-key")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 DB_CONFIG = {
-    "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", ""),
-    "database": os.getenv("DB_NAME", "logitrack"),
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": int(os.getenv("DB_PORT", 5432))
+    "user"        : os.getenv("DB_USER", "postgres"),
+    "password"    : os.getenv("DB_PASSWORD", ""),
+    "database"    : os.getenv("DB_NAME", "logitrack"),
+    "host"        : os.getenv("DB_HOST", "localhost"),
+    "port"        : int(os.getenv("DB_PORT", 5432))
 }
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092")

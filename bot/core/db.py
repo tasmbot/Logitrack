@@ -186,9 +186,9 @@ async def get_order_details(pool, delivery_id: int) -> Optional[dict]:
         row = await conn.fetchrow("""
             SELECT 
                 o.order_id, 
-                s.status_name, 
+                s.status_name,
                 l.address,
-                CONCAT('₽ ', o.total_price::numeric) as total_price,
+                CONCAT(o.total_price::numeric, ' ₽') as total_price, 
                 CONCAT(COALESCE(o.total_weight, 0), ' кг') as total_weight
             FROM deliveries d
             JOIN orders o ON d.order_id = o.order_id

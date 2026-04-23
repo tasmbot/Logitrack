@@ -49,22 +49,10 @@ async def select_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE, de
 
     pool = get_pool(context)
     delivery_info = None
-    if pool:
-        try:
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow("""
-                    SELECT o.order_id, s.status_name, l.address,
-                    CONCAT('₽ ', o.total_price::numeric) as total_price, 
-                    CONCAT(COALESCE(o.total_weight, 0), ' кг') as total_weight
-                    FROM deliveries d
-                    JOIN orders o ON d.order_id = o.order_id
-                    JOIN statuses s ON o.status_id = s.status_id
-                    JOIN locations l ON d.location_id = l.location_id
-                    WHERE d.delivery_id = $1
-                """, delivery_id)
-                if row: delivery_info = dict(row)
-        except Exception as e:
-            logger.error(f"Ошибка загрузки деталей: {e}")
+    try:
+        delivery_info = get_order_details(pool, delivery_id)
+    except Exception as e:
+        logger.error(f"Ошибка загрузки деталей: {e}")
 
     order_id = delivery_info['order_id'] if delivery_info else delivery_id
     info_text = f"✅ *Заказ #{order_id}*\n"
