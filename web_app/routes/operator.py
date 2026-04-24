@@ -252,42 +252,60 @@ async def operator_courier_route_page(request: Request, courier_id: int):
         route_stats = {"distance_km": None, "time_min": None}
         route_geometry = None
         
-        if route_id and delivery:
-            # Читаем текущие метрики из БД
-            stats_row = await conn.fetchrow(
-                "SELECT total_distance_km, total_time_min FROM routes WHERE route_id = $1", 
-                route_id
-            )
-            if stats_row:
-                route_stats["distance_km"] = stats_row["total_distance_km"]
-                route_stats["time_min"] = stats_row["total_time_min"]
-
-            # Если метрик нет и точек ≥ 2 → запрашиваем ORS
-            if len(points) >= 2:
-                coords = [(float(p["longitude"]), float(p["latitude"])) for p in points 
-                        if p["latitude"] and p["longitude"]]
+        if route_id:
+            # Читаем кэш из БД
+            cache_row = await conn.fetchrow("""
+                SELECT route_geometry, total_distance_km, total_time_min 
+                FROM routes WHERE route_id = $1
+            """, route_id)
+            
+            if cache_row and cache_row["route_geometry"] and cache_row["total_distance_km"]:
+                # ✅ Кэш есть — используем его
+                route_geometry = cache_row["route_geometry"]
+                # 🔹 Обработка: если это строка (двойная сериализация) — распарсим
+                if isinstance(route_geometry, str):
+                    try:
+                        route_geometry = json.loads(route_geometry)
+                    except (json.JSONDecodeError, TypeError):
+                        route_geometry = None
                 
-                if len(coords) >= 2:
-                    from core.routing import get_route_geometry_from_coords
-                    route_data = await get_route_geometry_from_coords(coords)
+                route_stats["distance_km"] = float(cache_row["total_distance_km"])
+                route_stats["time_min"] = float(cache_row["total_time_min"])
+                logger.debug(f"✅ Кэш маршрута #{route_id} использован")
+            else:
+                # Если метрик нет и точек ≥ 2 → запрашиваем ORS
+                if points and len(points) >= 2:
+                    coords = [(float(p["longitude"]), float(p["latitude"])) for p in points 
+                            if p["latitude"] and p["longitude"]]
                     
-                    if route_data:
-                        route_geometry = route_data["geometry"]
-                        route_stats["distance_km"] = round(route_data["distance_m"] / 1000, 2)
+                    if len(coords) >= 2:
+                        from core.routing import get_route_geometry_from_coords
+                        route_data = await get_route_geometry_from_coords(coords)
                         
-                        # 🔹 Применяем коэффициент транспорта к длительности
-                        vehicle_type = courier_info.get("vehicle_type") or "car"
-                        coeff = vehicle_coefficient.get(vehicle_type, [1.0, "Неизвестный"])[0]
-                        
-                        adjusted_duration_sec = route_data["duration_sec"] * coeff
-                        route_stats["time_min"] = round(adjusted_duration_sec / 60, 2)
-                        
-                        # Сохраняем в БД (уже с учётом коэффициента)
-                        await conn.execute(
-                            "UPDATE routes SET total_distance_km = $1, total_time_min = $2 WHERE route_id = $3",
-                            route_stats["distance_km"], route_stats["time_min"], route_id
-                        )
-                        logger.info(f"✅ Метрики маршрута #{route_id} рассчитаны (коэфф. {vehicle_type}: x{coeff})")
+                        if route_data:
+                            route_geometry = route_data["geometry"]
+                            route_stats["distance_km"] = round(route_data["distance_m"] / 1000, 2)
+                            
+                            # 🔹 Применяем коэффициент транспорта к длительности
+                            vehicle_type = courier_info.get("vehicle_type") or "car"
+                            coeff = vehicle_coefficient.get(vehicle_type, [1.0, "Неизвестный"])[0]
+                            
+                            adjusted_duration_sec = route_data["duration_sec"] * coeff
+                            route_stats["time_min"] = round(adjusted_duration_sec / 60, 2)
+                            
+                            # Сохраняем в БД (уже с учётом коэффициента)
+                            await conn.execute(
+                                """UPDATE routes
+                                   SET total_distance_km = $1, 
+                                       total_time_min = $2,
+                                       route_geometry=$3
+                                   WHERE route_id = $4""",
+                                route_stats["distance_km"],
+                                route_stats["time_min"],
+                                route_geometry,
+                                route_id
+                            )
+                            logger.info(f"✅ Метрики маршрута #{route_id} рассчитаны (коэфф. {vehicle_type}: x{coeff})")
 
     # 🔹 Подготавливаем информацию о транспорте для шаблона
     vehicle_type = courier_info.get("vehicle_type") or "car"
@@ -548,13 +566,16 @@ async def reorder_route_points(
                 if route_data:
                     await conn.execute("""
                         UPDATE routes 
-                        SET total_distance_km = $1, total_time_min = $2 
-                        WHERE route_id = $3
+                        SET total_distance_km = $1,
+                            total_time_min = $2,
+                            route_geometry = $3 
+                        WHERE route_id = $4
                     """, 
                     round(route_data["distance_m"] / 1000, 2),
                     round(route_data["duration_sec"] / 60, 2),
+                    route_data["geometry"],
                     route_id)
-                    logger.info(f"🔄 Метрики маршрута #{route_id} обновлены после реордера")
+                    logger.info(f"🔄 Кэш маршрута #{route_id} обновлен после реордера")
     except Exception as e:
         logger.error(f"⚠️ Ошибка пересчёта метрик маршрута #{route_id}: {e}")
         # Не блокируем ответ, если ORS временно недоступен
