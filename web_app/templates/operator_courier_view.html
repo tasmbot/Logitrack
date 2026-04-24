@@ -53,7 +53,7 @@
     <h3 class="font-bold mb-3 text-lg">✏️ Редактирование порядка точек</h3>
     <p class="text-sm text-gray-500 mb-3">Перетащите пункты в нужном порядке и нажмите «Сохранить»</p>
     
-    <ul id="route-points-list" data-route-id="{{ route_id }}" class="space-y-2 max-h-64 overflow-y-auto p-2 bg-gray-50 rounded border">
+    <ul id="route-points-list" data-route-id="{{ route_id }}" class="space-y-2 max-h-96 overflow-y-auto p-2 bg-gray-50 rounded border">
         {% for point in points %}
         <li data-location-id="{{ point.location_id }}" class="flex items-center justify-between p-3 bg-white rounded shadow-sm cursor-grab active:cursor-grabbing border hover:bg-blue-50 transition">
             <div class="flex items-center gap-3">
