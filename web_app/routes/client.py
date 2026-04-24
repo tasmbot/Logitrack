@@ -46,7 +46,7 @@ async def get_orders(request: Request):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT o.order_id, l.address as delivery_location, s.status_name,
-                   o.total_price, to_char(o.created_at, 'DD-MM-YYYY HH24:MI') as created_at, 
+                   CONCAT('₽ ', o.total_price::numeric) as total_price, to_char(o.created_at, 'DD-MM-YYYY HH24:MI') as created_at, 
                    COALESCE(string_agg(i.item_name || ' x' || oi.ordered_quantity, ', '), '') as items
             FROM orders o
             JOIN statuses s ON o.status_id = s.status_id

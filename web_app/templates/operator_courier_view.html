@@ -100,8 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
         columns: [
             {title:"ID", field:"order_id", width:60, formatter: (cell) => 
                 `<a href="/operator/orders/${cell.getValue()}/detail" class="text-blue-600 hover:underline font-medium">#${cell.getValue()}</a>`},
-            {title:"Клиент", field:"client_name"},
-            {title:"Телефон", field:"client_phone", width:110},
+            {title:"Клиент", field:"client_name", width: 110},
+            {title:"Телефон", field:"client_phone", width:180},
             {title:"Адрес", field:"delivery_address"},
             {title:"Вес", field:"total_weight", width:70},
             {title:"Статус", field:"status_name", width:100},

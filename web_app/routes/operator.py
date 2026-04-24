@@ -233,7 +233,7 @@ async def operator_courier_route_page(request: Request, courier_id: int):
 
         orders = await conn.fetch("""
             SELECT o.order_id, CONCAT(u.first_name, ' ', u.last_name) AS client_name, u.phone AS client_phone,
-                   l.address AS delivery_address, COALESCE(o.total_weight, 0) AS total_weight,
+                   l.address AS delivery_address, CONCAT(COALESCE(o.total_weight, 0), ' кг') AS total_weight,
                    s.status_name, to_char(o.created_at, 'DD-MM-YYYY HH24:MI') AS created_at
             FROM deliveries d
             JOIN orders o ON d.order_id = o.order_id

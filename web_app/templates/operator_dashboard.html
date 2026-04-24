@@ -47,7 +47,9 @@
 <!-- 3. Журнал аудита -->
 <div class="bg-white p-4 rounded shadow mb-6">
     <h3 class="font-bold mb-3 text-lg">📜 Журнал действий</h3>
-    <div id="audit-table" class="w-full" style="height: 400px;"></div>
+    <div id="audit-table" style="min-width: 900px;"></div>
+    <!-- 🔹 Контейнер пагинации для аудита -->
+    <div id="audit-pagination" class="mt-3 flex justify-center"></div>
 </div>
 
 <!-- Модальное окно смены статуса -->
@@ -65,6 +67,134 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- 🔹 CSS для современного вида таблицы аудита -->
+<style>
+/* Современные стили для Tabulator */
+.tabulator .tabulator-header {
+    background-color: #f8fafc !important;
+    border-bottom: 2px solid #e2e8f0 !important;
+    font-weight: 600;
+    color: #334155;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+.tabulator-row { border-bottom: 1px solid #f1f5f9 !important; }
+.tabulator-row:hover { background-color: #f8fafc !important; }
+.tabulator-cell { padding: 6px 8px !important; font-size: 0.875rem; }
+
+/* Обрезка текста с многоточием */
+.truncate-cell {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    color: #475569;
+    transition: color 0.2s;
+}
+.truncate-cell:hover { color: #2563eb; text-decoration: underline; }
+
+/* Стили для попапа полного значения */
+.audit-popup {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+}
+.audit-popup-content {
+    background: white;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 700px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+.audit-popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+.audit-popup-title { font-weight: 600; color: #1e293b; }
+.audit-popup-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #64748b;
+    cursor: pointer;
+    line-height: 1;
+}
+.audit-popup-close:hover { color: #1e293b; }
+.audit-popup-body {
+    flex: 1;
+    overflow: auto;
+    background: #f8fafc;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    font-family: monospace;
+    font-size: 0.875rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #334155;
+}
+.audit-popup-copy {
+    margin-top: 1rem;
+    padding: 0.5rem 1rem;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background 0.2s;
+    align-self: flex-end;
+}
+.audit-popup-copy:hover { background: #2563eb; }
+.audit-popup-copy.copied { background: #22c55e; }
+
+/* Современные стили для пагинации Tabulator */
+.tabulator .tabulator-footer {
+    padding: 8px 12px !important;
+    background-color: #f8fafc !important;
+    border-top: 1px solid #e2e8f0 !important;
+}
+.tabulator .tabulator-page {
+    background: white !important;
+    color: #334155 !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 0.375rem !important;
+    margin: 0 2px !important;
+    padding: 4px 10px !important;
+    font-size: 0.875rem !important;
+    transition: all 0.2s;
+}
+.tabulator .tabulator-page.active {
+    background: #3b82f6 !important;
+    color: white !important;
+    border-color: #3b82f6 !important;
+    font-weight: 600;
+}
+.tabulator .tabulator-page:hover:not(.active) {
+    background: #f1f5f9 !important;
+    border-color: #94a3b8 !important;
+}
+.tabulator .tabulator-page:disabled {
+    opacity: 0.5 !important;
+    cursor: not-allowed;
+}
+</style>
+
 <script>
     // === Таблица заказов ===
     let ordersTable;
@@ -85,14 +215,16 @@
                 ordersTable = new Tabulator("#orders-table", {
                      data,
                     height: "100%",
-                    layout: "fitDataStretch",
+                    layout: "fitColumns",
+                    pagination: "local",
+                    paginationSize: 25,
                     placeholder: "Нет заказов",
                     columns: [
                         // 1. ID как ссылка на детальную страницу
                         {title: "ID", field: "order_id", width: 60, formatter: (cell) => 
                             `<a href="/operator/orders/${cell.getValue()}/detail" class="text-blue-600 hover:underline font-medium">#${cell.getValue()}</a>`},
-                        {title: "Клиент", field: "client_name"},
-                        {title: "Телефон", field: "client_phone", width: 110},
+                        {title: "Клиент", field: "client_name", width: 110},
+                        {title: "Телефон", field: "client_phone", width: 180},
                         {title: "Адрес", field: "delivery_location"},
                         {title: "Сумма", field: "total_price", width: 90},
                         // 2. Статус: мультифильтр + клик по ячейке
@@ -242,8 +374,74 @@
         } catch (e) { console.error("❌ Ошибка графиков:", e); }
     }
 
-    // === Журнал аудита ===
     let auditTable;
+
+    // Универсальный форматтер обрезки + клик → попап
+    const truncateWithPopupFormatter = (cell) => {
+        const val = String(cell.getValue() || '');
+        const limit = 50;
+        
+        if (val.length <= limit) return val;
+        
+        const el = document.createElement('div');
+        el.className = 'truncate-cell';
+        el.textContent = val.slice(0, limit) + '…';
+        el.title = 'Нажмите, чтобы увидеть полностью';
+        el.dataset.fullValue = val;
+        
+        el.onclick = (e) => {
+            e.stopPropagation();
+            showValuePopup(val);
+        };
+        
+        return el;
+    };
+
+    // Показ попапа с полным значением (без изменений)
+    function showValuePopup(fullValue) {
+        const old = document.querySelector('.audit-popup');
+        if (old) old.remove();
+        
+        const popup = document.createElement('div');
+        popup.className = 'audit-popup';
+        popup.innerHTML = `
+            <div class="audit-popup-content">
+                <div class="audit-popup-header">
+                    <span class="audit-popup-title">📋 Полное значение</span>
+                    <button class="audit-popup-close" aria-label="Закрыть">&times;</button>
+                </div>
+                <div class="audit-popup-body"></div>
+                <button class="audit-popup-copy">📋 Копировать</button>
+            </div>
+        `;
+        
+        const body = popup.querySelector('.audit-popup-body');
+        body.textContent = fullValue;
+        
+        popup.querySelector('.audit-popup-close').onclick = () => popup.remove();
+        popup.onclick = (e) => { if (e.target === popup) popup.remove(); };
+        
+        const copyBtn = popup.querySelector('.audit-popup-copy');
+        copyBtn.onclick = async () => {
+            try {
+                await navigator.clipboard.writeText(fullValue);
+                copyBtn.textContent = '✅ Скопировано!';
+                copyBtn.classList.add('copied');
+                setTimeout(() => {
+                    copyBtn.textContent = '📋 Копировать';
+                    copyBtn.classList.remove('copied');
+                }, 2000);
+            } catch (err) {
+                copyBtn.textContent = '❌ Не удалось';
+                setTimeout(() => copyBtn.textContent = '📋 Копировать', 2000);
+            }
+        };
+        
+        document.body.appendChild(popup);
+        const onKey = (e) => { if (e.key === 'Escape') { popup.remove(); document.removeEventListener('keydown', onKey); } };
+        document.addEventListener('keydown', onKey);
+    }
+
     async function loadAuditTable() {
         try {
             const res = await fetch('/operator/api/audit');
@@ -254,17 +452,20 @@
                 auditTable.replaceData(data);
             } else {
                 auditTable = new Tabulator("#audit-table", {
-                     data,
+                    data,
                     height: "100%",
-                    layout: "fitDataStretch",
+                    layout: "fitColumns", // ✅ Заменяем fitDataStretch
+                    pagination: "local",
+                    paginationSize: 25,
+                    responsiveLayout: "collapse",
+                    movableColumns: true,
                     columns: [
-                        {title: "Время", field: "changed_at"},
-                        {title: "Пользователь", field: "user_name"},
-                        {title: "Таблица", field: "table_name"},
-                        {title: "ID записи", field: "record_id"},
-                        {title: "Действие", field: "action"},
-                        {title: "Старые значения", field: "old_values"}, 
-                        {title: "Новые значения", field: "new_values"} 
+                        {title: "Время", field: "changed_at", width: 160, tooltip: true},
+                        {title: "Таблица", field: "table_name", width: 100},
+                        {title: "ID", field: "record_id", width: 60},
+                        {title: "Действие", field: "action", width: 110},
+                        {title: "Старые значения", field: "old_values", minWidth: 250, tooltip: true, formatter: truncateWithPopupFormatter},
+                        {title: "Новые значения", field: "new_values", minWidth: 250, tooltip: true, formatter: truncateWithPopupFormatter}
                     ]
                 });
             }
