@@ -118,7 +118,7 @@ async def get_courier_active_deliveries(pool, courier_id: int, limit: int = 20):
             JOIN locations l ON d.location_id = l.location_id
             WHERE d.courier_id = $1 
               AND d.actual_delivery_datetime IS NULL
-              AND s.status_name NOT IN ('cancelled', 'delivered', 'refunded')
+              AND s.status_name NOT IN ('cancelled', 'delivered', 'returned')
             ORDER BY o.created_at DESC
             LIMIT $2
         """, courier_id, limit)

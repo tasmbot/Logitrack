@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 import asyncio
 import logging
+import json
 import csv, io, math, random
 
 from core.db import get_pool
@@ -23,19 +24,94 @@ async def _resolve_client_id(request: Request) -> int:
     if not row: raise HTTPException(status_code=404, detail="Профиль клиента не найден")
     return row["client_id"]
 
-async def _recalculate_route_background(pool, courier_id: int):
+async def _recalculate_route_with_metrics(pool, courier_id: int):
     """
-    Фоновая задача: вызывает SQL-функцию пересчёта маршрута курьера.
-    Выполняется ВНЕ основной транзакции создания заказа.
+    Фоновая задача: пересчитывает маршрут курьера (точки + метрики).
+    1. Вызывает SQL-функцию recalculate_courier_route() для перестроения route_points
+    2. Запрашивает ORS API для получения геометрии/длительности/дистанции
+    3. Применяет коэффициент транспорта курьера к времени
+    4. Обновляет таблицу routes кэшем
     """
-    # Небольшая задержка гарантирует, что основная транзакция успела закоммититься
-    await asyncio.sleep(1.5)
+    # 🔹 Коэффициенты для расчёта времени в зависимости от типа транспорта
+    vehicle_coefficient = { # коэффициенты для расчета приблизительного времени доставки в зависимости от типа транспорта курьера
+                "car"           : [1.2, 'Автомобиль'],
+                "scooter"       : [2.7, 'Скутер'],
+                "bicycle"       : [4.0, 'Велосипед'],
+                "motorcycle"    : [1.8, 'Мотоцикл'],
+                "van"           : [1.5, 'Минивен'],
+                "truck"         : [1.7, 'Грузовик']
+            }
+    
+    await asyncio.sleep(1.0)  # Гарантия, что основная транзакция закоммитилась
+    
     try:
         async with pool.acquire() as conn:
+            # 1. Пересобираем точки маршрута (удаляем отменённые, пересчитываем порядок)
             await conn.execute("SELECT recalculate_courier_route($1)", courier_id)
-            logger.info(f"✅ Маршрут курьера #{courier_id} успешно оптимизирован")
+            logger.info(f"✅ Точки маршрута курьера #{courier_id} пересобраны")
+            
+            # 2. Находим активный маршрут курьера + получаем тип транспорта
+            route_row = await conn.fetchrow("""
+                SELECT r.route_id, v.type as vehicle_type
+                FROM deliveries d
+                JOIN routes r ON d.route_id = r.route_id
+                LEFT JOIN couriers_vehicles cv ON d.courier_id = cv.courier_id
+                LEFT JOIN vehicles v ON cv.vehicle_id = v.vehicle_id
+                WHERE d.courier_id = $1 AND d.actual_delivery_datetime IS NULL
+                ORDER BY d.delivery_id DESC LIMIT 1
+            """, courier_id)
+            
+            if not route_row or not route_row["route_id"]:
+                logger.warning(f"⚠️ Нет активного маршрута у курьера #{courier_id}")
+                return
+            
+            route_id = route_row["route_id"]
+            
+            # 🔹 Получаем коэффициент транспорта (по умолчанию — автомобиль)
+            vehicle_type = route_row["vehicle_type"] or "car"
+            coeff = vehicle_coefficient.get(vehicle_type, [1.2, "Неизвестный"])[0]
+            logger.debug(f"🚗 Коэффициент для {vehicle_type}: x{coeff}")
+            
+            # 3. Загружаем точки в новом порядке
+            new_points = await conn.fetch("""
+                SELECT l.latitude, l.longitude FROM route_points rp
+                JOIN locations l ON rp.location_id = l.location_id
+                WHERE rp.route_id = $1 ORDER BY rp.sequence_num
+            """, route_id)
+            
+            coords = [(float(p["longitude"]), float(p["latitude"])) for p in new_points 
+                      if p["latitude"] and p["longitude"]]
+            
+            # 4. Если точек ≥ 2 → запрашиваем ORS
+            if len(coords) >= 2:
+                from core.routing import get_route_geometry_from_coords
+                route_data = await get_route_geometry_from_coords(coords)
+                
+                if route_data:
+                    # 🔹 Применяем коэффициент к длительности
+                    adjusted_duration_sec = route_data["duration_sec"] * coeff
+                    
+                    # 5. Обновляем кэш метрик в БД
+                    await conn.execute("""
+                        UPDATE routes 
+                        SET total_distance_km = $1,
+                            total_time_min = $2,
+                            route_geometry = $3
+                        WHERE route_id = $4
+                    """, 
+                    round(route_data["distance_m"] / 1000, 2),
+                    round(adjusted_duration_sec / 60, 2),  # 👈 Время с коэффициентом
+                    json.dumps(route_data["geometry"]),
+                    route_id)
+                    logger.info(f"🔄 Метрики маршрута #{route_id} обновлены (коэфф. {vehicle_type}: x{coeff})")
+                else:
+                    logger.warning(f"⚠️ ORS не вернул данные для маршрута #{route_id}")
+            else:
+                logger.info(f"ℹ️ Маршрут #{route_id} содержит <2 точек, ORS не запрашивается")
+                
     except Exception as e:
         logger.error(f"❌ Ошибка фонового пересчёта маршрута курьера #{courier_id}: {e}")
+        # Не пробрасываем исключение — задача фоновая, не должна ломать основной поток
 
 
 @router.get("/api/orders")
@@ -280,7 +356,7 @@ async def submit_order(request: Request):
 
     # 6. Асинхронный вызов пересчёта (ВНЕ транзакции!)
     try:
-        asyncio.create_task(_recalculate_route_background(pool, courier_id))
+        asyncio.create_task(_recalculate_route_with_metrics(pool, courier_id))
     except Exception as e:
         logger.warning(f"⚠️ Не удалось запустить фоновый пересчёт маршрута: {e}")
 
