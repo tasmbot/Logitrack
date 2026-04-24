@@ -92,6 +92,7 @@ async def show_courier_route(update: Update, context: ContextTypes.DEFAULT_TYPE)
             type_icon = LOCATION_TYPE_ICONS.get(location_type, LOCATION_TYPE_ICONS["default"])
                         
             btn_text = f"{type_icon} {p['sequence_num']}. {p['address'][:40]}{'...' if len(p['address']) > 40 else ''}"
+            # btn_text = f"{type_icon} {p['sequence_num']}. {p['address']}"
             
             # Ссылка на Яндекс.Карты
             maps_url = build_yandex_maps_url(p["latitude"], p["longitude"])

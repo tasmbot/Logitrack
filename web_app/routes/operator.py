@@ -185,10 +185,6 @@ async def update_order_status(request: Request, order_id: int, new_status_id: in
         if info and info["status_name"] in ('cancelled', 'returned') and info["courier_id"]:
             await conn.execute("SELECT recalculate_courier_route($1)", info["courier_id"]) # функция пересоберет все точки маршрута, исключив отмененные
             asyncio.create_task(_recalculate_route_with_metrics(pool, info["courier_id"])) 
-            await conn.execute(
-                "DELETE FROM deliveries where order_id = $1",
-                order_id
-            )
                         
     return JSONResponse(content={"status": "ok"})
 

@@ -50,7 +50,7 @@ async def select_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE, de
     pool = get_pool(context)
     delivery_info = None
     try:
-        delivery_info = get_order_details(pool, delivery_id)
+        delivery_info = await get_order_details(pool, delivery_id)
     except Exception as e:
         logger.error(f"Ошибка загрузки деталей: {e}")
 

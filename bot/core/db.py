@@ -262,7 +262,9 @@ async def get_courier_current_route(pool, courier_id: int) -> tuple[Optional[dic
                 SELECT d.delivery_id, d.route_id, o.order_id::text
                 FROM deliveries d
                 JOIN orders o ON d.order_id = o.order_id
+                JOIN statuses s ON o.status_id = s.status_id
                 WHERE d.courier_id = $1
+                AND s.status_name NOT IN ('cancelled', 'returned')
                 AND d.actual_delivery_datetime IS NULL
                 ORDER BY d.delivery_id DESC)
             SELECT route_id, STRING_AGG(order_id, ', ' ORDER BY order_id) AS order_ids
