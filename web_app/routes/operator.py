@@ -182,12 +182,12 @@ async def operator_courier_route_page(request: Request, courier_id: int):
 
     # 🔹 Коэффициенты для расчёта времени в зависимости от типа транспорта
     vehicle_coefficient = {
-        "car": [1.2, 'Автомобиль'],
-        "scooter": [2.5, 'Скутер'],
-        "bicycle": [3.0, 'Велосипед'],
-        "motorcycle": [1.8, 'Мотоцикл'],
-        "van": [1.5, 'Минивен'],
-        "truck": [1.5, 'Грузовик']
+                "car"           : [1.2, 'Автомобиль'],
+                "scooter"       : [2.7, 'Скутер'],
+                "bicycle"       : [4.0, 'Велосипед'],
+                "motorcycle"    : [1.8, 'Мотоцикл'],
+                "van"           : [1.5, 'Минивен'],
+                "truck"         : [1.7, 'Грузовик']
     }
 
     async with pool.acquire() as conn:
@@ -436,11 +436,11 @@ async def order_detail_page(request: Request, order_id: int):
         
         vehicle_coefficient = { # коэффициенты для расчета приблизительного времени доставки в зависимости от типа транспорта курьера
                     "car"           : [1.2, 'Автомобиль'],
-                    "scooter"       : [2.5, 'Скутер'],
-                    "bicycle"       : [3.0, 'Велосипед'],
+                    "scooter"       : [2.7, 'Скутер'],
+                    "bicycle"       : [4.0, 'Велосипед'],
                     "motorcycle"    : [1.8, 'Мотоцикл'],
                     "van"           : [1.5, 'Минивен'],
-                    "truck"         : [1.5, 'Грузовик']
+                    "truck"         : [1.7, 'Грузовик']
                 }
                 
         if delivery and delivery.get("latitude") and delivery.get("longitude"):  # координаты курьера

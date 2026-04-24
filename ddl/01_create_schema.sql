@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS public.routes
     name text COLLATE pg_catalog."default" NOT NULL,
     total_distance_km numeric(6, 2),
     total_time_min integer,
+    route_geometry jsonb,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT routes_pkey PRIMARY KEY (route_id)

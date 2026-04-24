@@ -11,6 +11,14 @@ from utils.keyboards import kb_back
 
 logger = logging.getLogger(__name__)
 
+LOCATION_TYPE_ICONS = {
+    "store"             : "🛒",
+    "delivery_point"    : "🏠",
+    "warehouse"         : "🏭",
+    "pickup"            : "📦",
+    "default"           : "📍"
+}
+
 def build_yandex_maps_url(lat: float, lon: float, zoom: int = 15) -> str:
     """Формирует ссылку на Яндекс.Карты с указанной точкой."""
     # Формат: ?pt=longitude,latitude&z=zoom&l=map
@@ -55,7 +63,7 @@ async def show_courier_route(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     try:
-        delivery, points = await get_courier_current_route(pool, courier_id)
+        delivery, points, stats = await get_courier_current_route(pool, courier_id)
         
         if not delivery or not points:
             await query.edit_message_text(
@@ -66,27 +74,29 @@ async def show_courier_route(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
         
-        # Формируем текст с точками маршрута
-        text = f"🗺 *Маршрут для заказа #{delivery['order_id']}*\n"
-        text += f"📦 Доставка #{delivery['delivery_id']}\n"
+        orders_str = delivery.get('order_ids', '')
+        if stats:
+            distance = f"{stats['total_distance_km']:.1f} км" if stats.get('total_distance_km') else "—"
+            duration = f"{stats['total_time_min']} мин" if stats.get('total_time_min') else "—"
+            stats_text = f"📊 {distance} • {duration}\n"
+        else:
+            stats_text = "📊 Статистика недоступна\n"
+            
+        text = f"🗺 *Маршрут по заказам: {orders_str}*\n{stats_text}"
         text += "─" * 20 + "\n\n"
         
         keyboard = []
         coords_for_route = []
-        for p in points:
-            # Статус точки
-            status_icon = "✅" if p["actual_arrival_time"] else "⏳"
-            time_info = ""
-            if p["expected_arrival_time"]:
-                time_info = f" 🕐 {p['expected_arrival_time'].strftime('%H:%M')}"
-            
-            # Текст кнопки: "1. 🏠 Адрес (15:30)"
-            btn_text = f"{status_icon} {p['sequence_num']}. {p['address'][:40]}{'...' if len(p['address']) > 40 else ''}{time_info}"
+        for p in points:            
+            location_type = p.get("location_type", "default").lower()
+            type_icon = LOCATION_TYPE_ICONS.get(location_type, LOCATION_TYPE_ICONS["default"])
+                        
+            btn_text = f"{type_icon} {p['sequence_num']}. {p['address'][:40]}{'...' if len(p['address']) > 40 else ''}"
             
             # Ссылка на Яндекс.Карты
             maps_url = build_yandex_maps_url(p["latitude"], p["longitude"])
             keyboard.append([InlineKeyboardButton(btn_text, url=maps_url)])
-
+            
             # Добавляем координаты для общего маршрута
             coords_for_route.append((p["longitude"], p["latitude"]))
         

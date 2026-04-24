@@ -258,13 +258,16 @@ async def get_courier_current_route(pool, courier_id: int) -> tuple[Optional[dic
     async with pool.acquire() as conn:
         # 1. Находим активную доставку с маршрутом
         delivery = await conn.fetchrow("""
-            SELECT d.delivery_id, d.route_id, o.order_id
-            FROM deliveries d
-            JOIN orders o ON d.order_id = o.order_id
-            WHERE d.courier_id = $1 
-              AND d.actual_delivery_datetime IS NULL
-            ORDER BY d.delivery_id DESC 
-            LIMIT 1
+            WITH OrdersData as (
+                SELECT d.delivery_id, d.route_id, o.order_id::text
+                FROM deliveries d
+                JOIN orders o ON d.order_id = o.order_id
+                WHERE d.courier_id = $1
+                AND d.actual_delivery_datetime IS NULL
+                ORDER BY d.delivery_id DESC)
+            SELECT route_id, STRING_AGG(order_id, ', ' ORDER BY order_id) AS order_ids
+            FROM OrdersData
+            GROUP BY route_id
         """, courier_id)
         
         if not delivery:
@@ -288,4 +291,13 @@ async def get_courier_current_route(pool, courier_id: int) -> tuple[Optional[dic
             ORDER BY rp.sequence_num ASC
         """, delivery["route_id"])
         
-        return dict(delivery), [dict(p) for p in points]
+        route_stats = await conn.fetchrow("""
+            SELECT 
+                route_id,
+                total_distance_km,
+                total_time_min
+            FROM routes
+            WHERE route_id = $1
+        """, delivery["route_id"])
+        
+        return dict(delivery), [dict(p) for p in points], dict(route_stats) if route_stats else None
