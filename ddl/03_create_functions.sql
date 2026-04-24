@@ -121,3 +121,70 @@ BEGIN
         (SELECT COUNT(*) FROM route_points WHERE route_id = v_route_id);
 END;
 $$ LANGUAGE plpgsql;
+
+-- Функция возврата товаров на склад
+CREATE OR REPLACE FUNCTION return_items_to_stock_on_cancel()
+RETURNS TRIGGER AS $$
+DECLARE
+    r_item RECORD;
+    v_store_location_id INT;
+    v_old_status_name TEXT;
+    v_new_status_name TEXT;
+BEGIN
+    -- 1. Получаем названия статусов для проверки
+    SELECT status_name INTO v_old_status_name FROM statuses WHERE status_id = OLD.status_id;
+    SELECT status_name INTO v_new_status_name FROM statuses WHERE status_id = NEW.status_id;
+    
+    -- 2. Проверяем: статус изменился НА 'cancelled' или 'returned'
+    -- И НЕ был уже в этих статусах (защита от повторного срабатывания)
+    IF v_new_status_name NOT IN ('cancelled', 'returned') 
+       OR v_old_status_name IN ('cancelled', 'returned') THEN
+        RETURN NEW;
+    END IF;
+    
+    -- 3. Находим склад (магазин), с которого списывались товары
+    -- Используем pickup_location_id из deliveries — это и есть источник товаров
+    SELECT pickup_location_id INTO v_store_location_id
+    FROM deliveries
+    WHERE order_id = NEW.order_id
+    LIMIT 1;
+    
+    IF v_store_location_id IS NULL THEN
+        -- Если доставки ещё нет (заказ отменён до назначения), пробуем найти ближайший магазин
+        -- Это запасной вариант; в идеале логика должна гарантировать наличие pickup_location_id
+        RAISE NOTICE '⚠️ Нет pickup_location_id для заказа %, возврат пропущен', NEW.order_id;
+        RETURN NEW;
+    END IF;
+    
+    -- 4. Возвращаем каждый товар из заказа обратно на склад
+    FOR r_item IN
+        SELECT item_id, ordered_quantity
+        FROM order_items
+        WHERE order_id = NEW.order_id
+    LOOP
+        -- Обновляем остатки: увеличиваем quantity на количество из заказа
+        UPDATE store_stock
+        SET quantity = quantity + r_item.ordered_quantity,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE location_id = v_store_location_id
+          AND item_id = r_item.item_id;
+          
+        -- 🔹 Опционально: логирование возврата в аудит
+        -- (если нужно отслеживать, кто и когда вернул товар)
+        -- INSERT INTO audit_log (...) VALUES (...);
+    END LOOP;
+    
+    RAISE NOTICE '✅ Товары заказа % возвращены на склад %', NEW.order_id, v_store_location_id;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Триггер срабатывает ПОСЛЕ обновления статуса заказа
+DROP TRIGGER IF EXISTS trg_return_stock_on_cancel ON orders;
+
+CREATE TRIGGER trg_return_stock_on_cancel
+AFTER UPDATE OF status_id ON orders
+FOR EACH ROW
+WHEN (OLD.status_id IS DISTINCT FROM NEW.status_id)  -- Только если статус реально изменился
+EXECUTE FUNCTION return_items_to_stock_on_cancel();
