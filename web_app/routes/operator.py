@@ -180,14 +180,31 @@ async def operator_courier_route_page(request: Request, courier_id: int):
     pool = get_pool(request)
     if not pool: raise HTTPException(status_code=503, detail="БД недоступна")
 
+    # 🔹 Коэффициенты для расчёта времени в зависимости от типа транспорта
+    vehicle_coefficient = {
+        "car": [1.2, 'Автомобиль'],
+        "scooter": [2.5, 'Скутер'],
+        "bicycle": [3.0, 'Велосипед'],
+        "motorcycle": [1.8, 'Мотоцикл'],
+        "van": [1.5, 'Минивен'],
+        "truck": [1.5, 'Грузовик']
+    }
+
     async with pool.acquire() as conn:
-        courier_info = await conn.fetchrow(
-            "SELECT CONCAT(u.first_name, ' ', u.last_name) as full_name FROM couriers c JOIN users u ON c.user_id = u.user_id WHERE c.courier_id = $1",
-            courier_id
-        )
+        # 1. Информация о курьере + тип транспорта
+        courier_info = await conn.fetchrow("""
+            SELECT CONCAT(u.first_name, ' ', u.last_name) as full_name, v.type as vehicle_type
+            FROM couriers c 
+            JOIN users u ON c.user_id = u.user_id
+            LEFT JOIN couriers_vehicles cv ON c.courier_id = cv.courier_id
+            LEFT JOIN vehicles v ON cv.vehicle_id = v.vehicle_id
+            WHERE c.courier_id = $1
+        """, courier_id)
+        
         if not courier_info:
             raise HTTPException(status_code=404, detail="Курьер не найден")
 
+        # 2. Активный маршрут курьера
         delivery = await conn.fetchrow("""
             SELECT d.delivery_id, r.route_id 
             FROM deliveries d JOIN routes r ON d.route_id = r.route_id
@@ -225,24 +242,57 @@ async def operator_courier_route_page(request: Request, courier_id: int):
             JOIN users u ON c.user_id = u.user_id
             LEFT JOIN locations l ON d.location_id = l.location_id
             WHERE d.courier_id = $1
-              AND s.status_name IN ('created', 'in_transit', 'assigned', 'on_the_way')
+              AND s.status_name IN ('created', 'in_transit')
             ORDER BY o.created_at DESC
         """, courier_id)
 
-    route_id = delivery["route_id"] if delivery else None
-
-    # Получение геометрии реального маршрута от ORS
-    route_geometry = None
-    if points and len(points) >= 2:
-        # Собираем координаты в порядке sequence_num: формат ORS = [longitude, latitude]
-        coords = [(float(p["longitude"]), float(p["latitude"])) for p in points 
-                if p["latitude"] and p["longitude"]]
+        route_id = delivery["route_id"] if delivery else None
         
-        if len(coords) >= 2:
-            from core.routing import get_route_geometry_from_coords
-            route_geometry = await get_route_geometry_from_coords(coords)
-            logger.info(f"🗺️ ORS запрос: {len(coords)} точек → геометрия: {'✅' if route_geometry else '❌'}")
+        # 🔹 3. Получение метрик маршрута с учётом коэффициента транспорта
+        route_stats = {"distance_km": None, "time_min": None}
+        route_geometry = None
+        
+        if route_id and delivery:
+            # Читаем текущие метрики из БД
+            stats_row = await conn.fetchrow(
+                "SELECT total_distance_km, total_time_min FROM routes WHERE route_id = $1", 
+                route_id
+            )
+            if stats_row:
+                route_stats["distance_km"] = stats_row["total_distance_km"]
+                route_stats["time_min"] = stats_row["total_time_min"]
 
+            # Если метрик нет и точек ≥ 2 → запрашиваем ORS
+            if len(points) >= 2:
+                coords = [(float(p["longitude"]), float(p["latitude"])) for p in points 
+                        if p["latitude"] and p["longitude"]]
+                
+                if len(coords) >= 2:
+                    from core.routing import get_route_geometry_from_coords
+                    route_data = await get_route_geometry_from_coords(coords)
+                    
+                    if route_data:
+                        route_geometry = route_data["geometry"]
+                        route_stats["distance_km"] = round(route_data["distance_m"] / 1000, 2)
+                        
+                        # 🔹 Применяем коэффициент транспорта к длительности
+                        vehicle_type = courier_info.get("vehicle_type") or "car"
+                        coeff = vehicle_coefficient.get(vehicle_type, [1.0, "Неизвестный"])[0]
+                        
+                        adjusted_duration_sec = route_data["duration_sec"] * coeff
+                        route_stats["time_min"] = round(adjusted_duration_sec / 60, 2)
+                        
+                        # Сохраняем в БД (уже с учётом коэффициента)
+                        await conn.execute(
+                            "UPDATE routes SET total_distance_km = $1, total_time_min = $2 WHERE route_id = $3",
+                            route_stats["distance_km"], route_stats["time_min"], route_id
+                        )
+                        logger.info(f"✅ Метрики маршрута #{route_id} рассчитаны (коэфф. {vehicle_type}: x{coeff})")
+
+    # 🔹 Подготавливаем информацию о транспорте для шаблона
+    vehicle_type = courier_info.get("vehicle_type") or "car"
+    vehicle_label, vehicle_name = vehicle_coefficient.get(vehicle_type, [1.0, "Неизвестный"])
+    
     # сериализуем datetime/Decimal перед передачей в шаблон
     return request.app.state.templates.TemplateResponse(
         "operator_courier_view.html",
@@ -251,9 +301,11 @@ async def operator_courier_route_page(request: Request, courier_id: int):
             "courier_name": courier_info["full_name"],
             "courier_id": courier_id,
             "route_id": route_id,
+            "vehicle_type": vehicle_name,  # 👈 Передаём тип транспорта для отображения
             "orders": _serialize_for_json([dict(o) for o in orders]),
             "points": _serialize_for_json([dict(p) for p in points]),
-            "route_geometry": route_geometry
+            "route_geometry": route_geometry,
+            "route_stats": route_stats 
         }
     )
 
@@ -468,18 +520,44 @@ async def reorder_route_points(
 
         courier_user_id = delivery["courier_user_id"]
 
-        # 🔒 Атомарное обновление без конфликтов UNIQUE(route_id, sequence_num)
         async with conn.transaction():
-            await conn.execute("SET CONSTRAINTS route_points_pkey DEFERRED")
-            # Прямое обновление без промежуточных хаков
+            
             for idx, loc_id in enumerate(new_order, start=1):
                 await conn.execute("""
                     UPDATE route_points 
                     SET sequence_num = $1 
                     WHERE route_id = $2 AND location_id = $3
                 """, idx, route_id, loc_id)
+
+    # 🔹 После коммита пересчитываем метрики по новому порядку
+    try:
+        async with pool.acquire() as conn:
+            new_points = await conn.fetch("""
+                SELECT l.latitude, l.longitude FROM route_points rp
+                JOIN locations l ON rp.location_id = l.location_id
+                WHERE rp.route_id = $1 ORDER BY rp.sequence_num
+            """, route_id)
+            
+            coords = [(float(p["longitude"]), float(p["latitude"])) for p in new_points 
+                      if p["latitude"] and p["longitude"]]
+            
+            if len(coords) >= 2:
+                from core.routing import get_route_geometry_from_coords
+                route_data = await get_route_geometry_from_coords(coords)
                 
-                
+                if route_data:
+                    await conn.execute("""
+                        UPDATE routes 
+                        SET total_distance_km = $1, total_time_min = $2 
+                        WHERE route_id = $3
+                    """, 
+                    round(route_data["distance_m"] / 1000, 2),
+                    round(route_data["duration_sec"] / 60, 2),
+                    route_id)
+                    logger.info(f"🔄 Метрики маршрута #{route_id} обновлены после реордера")
+    except Exception as e:
+        logger.error(f"⚠️ Ошибка пересчёта метрик маршрута #{route_id}: {e}")
+        # Не блокируем ответ, если ORS временно недоступен
 
     return {"status": "ok", "message": "Порядок точек успешно обновлён"}
 

@@ -342,6 +342,12 @@ CREATE TRIGGER trg_delivery_coordinates_updated
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER trg_route_updated
+    BEFORE UPDATE ON public.routes
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+
 -- 1. Автоматическое создание записи в таблице couriers при регистрации нового пользователя с role_id=3
 CREATE OR REPLACE FUNCTION auto_create_courier()
 RETURNS TRIGGER AS $$

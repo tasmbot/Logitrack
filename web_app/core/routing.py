@@ -64,14 +64,14 @@ async def get_route_geometry(lon_start: float, lat_start: float, lon_end: float,
     
 async def get_route_geometry_from_coords(coords: list[tuple[float, float]]) -> list[list[float]] | None:
     """
-    Возвращает геометрию маршрута от ORS для списка координат.
+    Возвращает геометрию маршрута, дистанцию (м) и время (сек) от ORS для списка координат.
     
     Args:
         coords: список кортежей [(lon1, lat1), (lon2, lat2), ...]
                 ВАЖНО: формат ORS — [longitude, latitude]
     
     Returns:
-        Список координат [[lon1, lat1], [lon2, lat2], ...] для отрисовки на Leaflet,
+        Список координат [[lon1, lat1], [lon2, lat2], ...] для отрисовки на Leaflet, расстояние в метрах distance_m и время в секундах duration_sec
         или None при ошибке.
     """
     if not ORS_API_KEY or len(coords) < 2:
@@ -109,9 +109,14 @@ async def get_route_geometry_from_coords(coords: list[tuple[float, float]]) -> l
             data = resp.json()
             
             # Парсим GeoJSON LineString
-            if data.get("features") and data["features"][0]["geometry"]["type"] == "LineString":
-                # ORS возвращает [[lon1, lat1], [lon2, lat2], ...]
-                return data["features"][0]["geometry"]["coordinates"]
+            if data.get("features") and data["features"][0].get("geometry"):
+                feature = data["features"][0]
+                summary = feature.get("properties", {}).get("summary", {})
+                return {
+                    "geometry": feature["geometry"].get("coordinates"),
+                    "distance_m": int(summary.get("distance", 0)),
+                    "duration_sec": int(summary.get("duration", 0))
+                }
             return None
             
     except httpx.TimeoutException:

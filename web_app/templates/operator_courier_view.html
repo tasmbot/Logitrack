@@ -24,6 +24,22 @@
 <!-- Карта маршрута -->
 <div class="bg-white p-4 rounded shadow mb-6">
     <h3 class="font-bold mb-3 text-lg">🗺️ Карта маршрута</h3>
+    <!-- 🔹 Блок метрик -->
+    {% if route_stats.distance_km %}
+    <div class="flex gap-4 mb-3 text-sm">
+        <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded font-medium">
+            📏 {{ route_stats.distance_km }} км
+        </span>
+        <span class="px-3 py-1 bg-green-100 text-green-800 rounded font-medium">
+            ⏱️ ~{{ route_stats.time_min | int }} мин
+        </span>
+        {% if vehicle_type %}
+        <span class="px-3 py-1 bg-purple-100 text-purple-800 rounded font-medium">
+            {{ vehicle_type }}
+        </span>
+        {% endif %}
+    </div>
+    {% endif %}
     <div id="courier-map" 
          style="height: 450px; width: 100%;" 
          class="rounded border z-0 relative"
